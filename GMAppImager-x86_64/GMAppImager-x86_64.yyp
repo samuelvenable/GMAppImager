@@ -31,8 +31,6 @@
     {"resourceType":"GMIncludedFile","resourceVersion":"1.0","name":"apprun","CopyToMask":-1,"filePath":"datafiles/application.appdir",},
     {"resourceType":"GMIncludedFile","resourceVersion":"1.0","name":"executable.desktop","CopyToMask":-1,"filePath":"datafiles/application.appdir",},
     {"resourceType":"GMIncludedFile","resourceVersion":"1.0","name":"icon.png","CopyToMask":-1,"filePath":"datafiles/application.appdir",},
-    {"resourceType":"GMIncludedFile","resourceVersion":"1.0","name":"LICENSE","CopyToMask":-1,"filePath":"datafiles",},
-    {"resourceType":"GMIncludedFile","resourceVersion":"1.0","name":"NotoSans-Regular.ttf","CopyToMask":-1,"filePath":"datafiles",},
   ],
   "isEcma": false,
   "LibraryEmitters": [],
@@ -40,11 +38,10 @@
     "IDEVersion": "2023.11.0.121",
   },
   "resources": [
-    {"id":{"name":"libfiledialogs","path":"extensions/libfiledialogs/libfiledialogs.yy",},},
     {"id":{"name":"obj_converter","path":"objects/obj_converter/obj_converter.yy",},},
     {"id":{"name":"libfilesystem","path":"extensions/libfilesystem/libfilesystem.yy",},},
     {"id":{"name":"rm_converter","path":"rooms/rm_converter/rm_converter.yy",},},
-    {"id":{"name":"scr_FileDialogs","path":"scripts/scr_FileDialogs/scr_FileDialogs.yy",},},
+    {"id":{"name":"libdlgmod","path":"extensions/libdlgmod/libdlgmod.yy",},},
     {"id":{"name":"libxprocess","path":"extensions/libxprocess/libxprocess.yy",},},
   ],
   "RoomOrderNodes": [
