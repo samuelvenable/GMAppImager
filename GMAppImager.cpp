@@ -44,7 +44,6 @@ std::string string_replace_all(std::string str, std::string substr, std::string 
   }
   return str;
 }
-
 std::vector<std::string> string_split(std::string str, char delimiter) {
   std::vector<std::string> vec;
   std::stringstream sstr(str);
