@@ -183,7 +183,7 @@ system(("chmod u+x \"${HOME}/.config/" + game_display_name + "/assets/Applicatio
 std::string o = get_save_filename_ext("AppImage Executable (*.AppImage)|*.AppImage", "Untitled.AppImage", environment_get_variable((char *)"HOME"), "Save As");
 if (o == "") { directory_destroy((char *)("${HOME}/.config/" + game_display_name).c_str()); exit(0); }
 file_copy((char *)("${HOME}/.config/" + game_display_name + "/assets/Application.AppImage").c_str(), (char *)o.c_str());
-//directory_destroy((char *)("${HOME}/.config/" + game_display_name).c_str());
+directory_destroy((char *)("${HOME}/.config/" + game_display_name).c_str());
 system(("chmod u+x \"" + o + "\"").c_str());
 return 0;
 }
