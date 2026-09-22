@@ -127,7 +127,7 @@ std::string icon = get_open_filename_ext("PNG Icon Files (*.png)|*.png", "", env
 if (icon == "") { directory_destroy((char *)("${HOME}/.config/" + game_display_name).c_str()); exit(0); }
 std::string d = get_directory_alt("Select Linux GameMaker Game Assets Directory...", environment_get_variable((char *)"HOME"));
 if (d == "") { directory_destroy((char *)("${HOME}/.config/" + game_display_name).c_str()); exit(0); }
-while (d.find_last_of("/") == d.length() && d != "/") { d = d.substr(0, d.length() - 1); }
+while (!d.empty() && d.find_last_of("/") == d.length() - 1 && d != "/") { d = d.substr(0, d.length() - 1); }
 std::vector<int> p; p.push_back(ProcessExecute((char *)("ldd \"" + e + "\"").c_str()));
 for (int s = 0; s < p.size(); s++) {
   std::vector<std::string> a = string_split(ExecutedProcessReadFromStandardOutput(p[s]), '\n');
