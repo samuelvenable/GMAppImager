@@ -185,10 +185,3 @@ directory_destroy((char *)("${HOME}/.config/" + game_display_name).c_str());
 system(("chmod u+x \"" + o + "\"").c_str());
 return 0;
 }
-
-
-
-
-
-
-
