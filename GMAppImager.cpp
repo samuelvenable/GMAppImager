@@ -27,16 +27,15 @@ SOFTWARE.
 #include <libdlgmod.hpp>
 #include <libfilesystem.hpp>
 #include <libxprocess.hpp>
+#include <cstdlib>
+#include <sstream>
 #include <string>
 #include <vector>
-#include <sstream>
-#include <algorithm>
-#include <cstdlib>
-std::string filename_name(std::string fname) {
+static std::string filename_name(std::string fname) {
   size_t fp = fname.find_last_of("/");
   return fname.substr(fp + 1);
 }
-std::string string_replace_all(std::string str, std::string substr, std::string nstr) {
+static std::string string_replace_all(std::string str, std::string substr, std::string nstr) {
   size_t pos = 0;
   while ((pos = str.find(substr, pos)) != std::string::npos) {
     str.replace(pos, substr.length(), nstr);
@@ -44,7 +43,7 @@ std::string string_replace_all(std::string str, std::string substr, std::string 
   }
   return str;
 }
-std::vector<std::string> string_split(std::string str, char delimiter) {
+static std::vector<std::string> string_split(std::string str, char delimiter) {
   std::vector<std::string> vec;
   std::stringstream sstr(str);
   std::string tmp;
@@ -186,6 +185,7 @@ directory_destroy((char *)("${HOME}/.config/" + game_display_name).c_str());
 system(("chmod u+x \"" + o + "\"").c_str());
 return 0;
 }
+
 
 
 
