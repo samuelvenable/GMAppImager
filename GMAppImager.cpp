@@ -114,6 +114,7 @@ blacklist_array.push_back("libxcb-dri2.so.0");
 blacklist_array.push_back("libfribidi.so.0");
 blacklist_array.push_back("libgmp.so.10");
 std::string systemfolder; std::string game_display_name = "GMAppImager";
+directory_create((char *)("${HOME}/.config/" + game_display_name).c_str());
 int uname = ProcessExecute((char *)"uname -i"); std::string unameoutput = ExecutedProcessReadFromStandardOutput(uname);
 unameoutput = string_replace_all(unameoutput, "\r", ""); unameoutput = string_replace_all(unameoutput, "\n", "");
 if (unameoutput == "i386") { systemfolder = "i386-linux-gnu"; } else if (unameoutput == "x86_64") { systemfolder = "x86_64-linux-gnu"; }
