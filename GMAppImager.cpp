@@ -52,6 +52,7 @@ static std::vector<std::string> string_split(std::string str, char delimiter) {
   return vec;
 }
 int main() {
+widget_set_locale();
 std::vector<std::string> blacklist_array;
 blacklist_array.push_back("ld-linux.so.2");
 blacklist_array.push_back("ld-linux-armhf.so.3");
