@@ -1,0 +1,2173 @@
+/*
+
+MIT License
+
+Copyright © 2021-2026 Samuel Venable
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+*/
+
+#include <cstdlib>
+#include <cstring>
+#include <climits>
+#include <cstdio>
+#include <cctype>
+#include <clocale>
+
+#include <sstream>
+#include <fstream>
+#include <string>
+#include <vector>
+#include <map>
+
+#include <libdlgmod/libdlgmod.h>
+
+#include <unistd.h>
+#include <sys/stat.h>
+
+#include <AppKit/AppKit.h>
+#include <UniformTypeIdentifiers/UTType.h>
+
+#if (defined(USE_SDL_POLLEVENT) || defined(USE_SDL2_POLLEVENT))
+#include <SDL.h>
+#endif
+#if defined(USE_SDL3_POLLEVENT)
+#include <SDL3/SDL.h>
+#endif
+
+using std::string;
+using std::vector;
+
+enum BUTTON_TYPES {
+  BUTTON_ABORT,
+  BUTTON_IGNORE,
+  BUTTON_OK,
+  BUTTON_CANCEL,
+  BUTTON_YES,
+  BUTTON_NO,
+  BUTTON_RETRY
+};
+
+enum CAPTION_TYPES {
+  CAPTION_INFORMATION,
+  CAPTION_QUESTION,
+  CAPTION_INPUT,
+  CAPTION_OPEN,
+  CAPTION_SAVE,
+  CAPTION_DIRECTORY,
+  CAPTION_COLOR,
+  CAPTION_ERROR
+};
+
+int const btn_array_len = 7;
+string btn_array[btn_array_len] = { "Abort", "Ignore", "OK", "Cancel", "Yes", "No", "Retry" };
+
+int const cpt_array_len = 8;
+string cpt_array[cpt_array_len] = { "Information", "Question", "Input Query", "Open", "Save As", "Select Directory", "Color", "Error" };
+
+void widget_set_locale_helper() {
+  const char *ptr = std::setlocale(LC_ALL, "");  
+  if (ptr && strlen(ptr) >= 2) {
+    if (ptr[0] == 'e' && ptr[1] == 'n') {
+      // en = English
+
+      btn_array[BUTTON_ABORT] = "Abort";
+      btn_array[BUTTON_IGNORE] = "Ignore";
+      btn_array[BUTTON_OK] = "OK";
+      btn_array[BUTTON_CANCEL] = "Cancel";
+      btn_array[BUTTON_YES] = "Yes";
+      btn_array[BUTTON_NO] = "No";
+      btn_array[BUTTON_RETRY] = "Retry";
+
+      cpt_array[CAPTION_INFORMATION] = "Information";
+      cpt_array[CAPTION_QUESTION] = "Question";
+      cpt_array[CAPTION_INPUT] = "Input Query";
+      cpt_array[CAPTION_OPEN] = "Open";
+      cpt_array[CAPTION_SAVE] = "Save As";
+      cpt_array[CAPTION_DIRECTORY] = "Select Directory";
+      cpt_array[CAPTION_COLOR] = "Color";
+      cpt_array[CAPTION_ERROR] = "Error";
+
+    } else if (ptr[0] == 'f' && ptr[1] == 'r') {
+      // fr = French
+
+      btn_array[BUTTON_ABORT] = "Avorter";
+      btn_array[BUTTON_IGNORE] = "Ignorer";
+      btn_array[BUTTON_OK] = "D'ACCORD";
+      btn_array[BUTTON_CANCEL] = "Annuler";
+      btn_array[BUTTON_YES] = "Oui";
+      btn_array[BUTTON_NO] = "Non";
+      btn_array[BUTTON_RETRY] = "Réessayer";
+
+      cpt_array[CAPTION_INFORMATION] = "Information";
+      cpt_array[CAPTION_QUESTION] = "Question";
+      cpt_array[CAPTION_INPUT] = "Requête d'entrée";
+      cpt_array[CAPTION_OPEN] = "Ouvrir";
+      cpt_array[CAPTION_SAVE] = "Enregistrer sous";
+      cpt_array[CAPTION_DIRECTORY] = "Sélectionner un répertoire";
+      cpt_array[CAPTION_COLOR] = "Couleur";
+      cpt_array[CAPTION_ERROR] = "Erreur";
+
+    } else if (ptr[0] == 'd' && ptr[1] == 'e') {
+      // de = German
+
+      btn_array[BUTTON_ABORT] = "Abbrechen";
+      btn_array[BUTTON_IGNORE] = "Ignorieren";
+      btn_array[BUTTON_OK] = "OK";
+      btn_array[BUTTON_CANCEL] = "Stornieren";
+      btn_array[BUTTON_YES] = "Ja";
+      btn_array[BUTTON_NO] = "NEIN";
+      btn_array[BUTTON_RETRY] = "Wiederholen";
+
+      cpt_array[CAPTION_INFORMATION] = "Information";
+      cpt_array[CAPTION_QUESTION] = "Frage";
+      cpt_array[CAPTION_INPUT] = "Eingabeabfrage";
+      cpt_array[CAPTION_OPEN] = "Offen";
+      cpt_array[CAPTION_SAVE] = "Speichern unter";
+      cpt_array[CAPTION_DIRECTORY] = "Verzeichnis auswählen";
+      cpt_array[CAPTION_COLOR] = "Farbe";
+      cpt_array[CAPTION_ERROR] = "Fehler";
+
+    } else if (ptr[0] == 'e' && ptr[1] == 's') {
+      // es = Spanish
+
+      btn_array[BUTTON_ABORT] = "Abortar";
+      btn_array[BUTTON_IGNORE] = "Ignorar";
+      btn_array[BUTTON_OK] = "DE ACUERDO";
+      btn_array[BUTTON_CANCEL] = "Cancelar";
+      btn_array[BUTTON_YES] = "Sí";
+      btn_array[BUTTON_NO] = "No";
+      btn_array[BUTTON_RETRY] = "Rever";
+
+      cpt_array[CAPTION_INFORMATION] = "Información";
+      cpt_array[CAPTION_QUESTION] = "Pregunta";
+      cpt_array[CAPTION_INPUT] = "Consulta de entrada";
+      cpt_array[CAPTION_OPEN] = "Abierta";
+      cpt_array[CAPTION_SAVE] = "Guardar como";
+      cpt_array[CAPTION_DIRECTORY] = "Seleccionar directorio";
+      cpt_array[CAPTION_COLOR] = "Color";
+      cpt_array[CAPTION_ERROR] = "Error";
+
+    } else if (ptr[0] == 'z' && ptr[1] == 'h') {
+      // zh = Chinese
+  
+      btn_array[BUTTON_ABORT] = "中止";
+      btn_array[BUTTON_IGNORE] = "忽略";
+      btn_array[BUTTON_OK] = "好的";
+      btn_array[BUTTON_CANCEL] = "取消";
+      btn_array[BUTTON_YES] = "是的";
+      btn_array[BUTTON_NO] = "不";
+      btn_array[BUTTON_RETRY] = "重试";
+
+      cpt_array[CAPTION_INFORMATION] = "信息";
+      cpt_array[CAPTION_QUESTION] = "问题";
+      cpt_array[CAPTION_INPUT] = "输入查询";
+      cpt_array[CAPTION_OPEN] = "打开";
+      cpt_array[CAPTION_SAVE] = "另存为";
+      cpt_array[CAPTION_DIRECTORY] = "选择目录";
+      cpt_array[CAPTION_COLOR] = "颜色";
+      cpt_array[CAPTION_ERROR] = "错误";
+
+    } else if (ptr[0] == 'j' && ptr[1] == 'a') {
+      // ja = Japanese
+  
+      btn_array[BUTTON_ABORT] = "アボート";
+      btn_array[BUTTON_IGNORE] = "無視する";
+      btn_array[BUTTON_OK] = "わかりました";
+      btn_array[BUTTON_CANCEL] = "キャンセル";
+      btn_array[BUTTON_YES] = "はい";
+      btn_array[BUTTON_NO] = "いいえ";
+      btn_array[BUTTON_RETRY] = "リトライ";
+
+      cpt_array[CAPTION_INFORMATION] = "情報";
+      cpt_array[CAPTION_QUESTION] = "質問";
+      cpt_array[CAPTION_INPUT] = "入力クエリ";
+      cpt_array[CAPTION_OPEN] = "開ける";
+      cpt_array[CAPTION_SAVE] = "名前を付けて保存";
+      cpt_array[CAPTION_DIRECTORY] = "ディレクトリを選択";
+      cpt_array[CAPTION_COLOR] = "色";
+      cpt_array[CAPTION_ERROR] = "エラー";
+
+    } else if (ptr[0] == 'k' && ptr[1] == 'o') {
+      // ko = Korean
+
+      btn_array[BUTTON_ABORT] = "중단";
+      btn_array[BUTTON_IGNORE] = "무시하다";
+      btn_array[BUTTON_OK] = "좋아요";
+      btn_array[BUTTON_CANCEL] = "취소";
+      btn_array[BUTTON_YES] = "예";
+      btn_array[BUTTON_NO] = "아니요";
+      btn_array[BUTTON_RETRY] = "다시 해 보다";
+
+      cpt_array[CAPTION_INFORMATION] = "정보";
+      cpt_array[CAPTION_QUESTION] = "질문";
+      cpt_array[CAPTION_INPUT] = "입력 쿼리";
+      cpt_array[CAPTION_OPEN] = "열려 있는";
+      cpt_array[CAPTION_SAVE] = "다른 이름으로 저장";
+      cpt_array[CAPTION_DIRECTORY] = "디렉터리 선택";
+      cpt_array[CAPTION_COLOR] = "색상";
+      cpt_array[CAPTION_ERROR] = "오류";
+
+    } else if (ptr[0] == 'r' && ptr[1] == 'u') {
+      // ru = Russian
+
+      btn_array[BUTTON_ABORT] = "Отмена";
+      btn_array[BUTTON_IGNORE] = "Игнорировать";
+      btn_array[BUTTON_OK] = "ХОРОШО";
+      btn_array[BUTTON_CANCEL] = "Отмена";
+      btn_array[BUTTON_YES] = "Да";
+      btn_array[BUTTON_NO] = "Нет";
+      btn_array[BUTTON_RETRY] = "Повторить попытку";
+
+      cpt_array[CAPTION_INFORMATION] = "Информация";
+      cpt_array[CAPTION_QUESTION] = "Вопрос";
+      cpt_array[CAPTION_INPUT] = "Входной запрос";
+      cpt_array[CAPTION_OPEN] = "Открыть";
+      cpt_array[CAPTION_SAVE] = "Сохранить как";
+      cpt_array[CAPTION_DIRECTORY] = "Выберите каталог";
+      cpt_array[CAPTION_COLOR] = "Цвет";
+      cpt_array[CAPTION_ERROR] = "Ошибка";
+
+    } else if (ptr[0] == 'p' && ptr[1] == 't') {
+      // pt = Portuguese
+
+      btn_array[BUTTON_ABORT] = "Abortar";
+      btn_array[BUTTON_IGNORE] = "Ignorar";
+      btn_array[BUTTON_OK] = "OK";
+      btn_array[BUTTON_CANCEL] = "Cancelar";
+      btn_array[BUTTON_YES] = "Sim";
+      btn_array[BUTTON_NO] = "Não";
+      btn_array[BUTTON_RETRY] = "Tentar novamente";
+
+      cpt_array[CAPTION_INFORMATION] = "Informação";
+      cpt_array[CAPTION_QUESTION] = "Pergunta";
+      cpt_array[CAPTION_INPUT] = "Consulta de entrada";
+      cpt_array[CAPTION_OPEN] = "Abrir";
+      cpt_array[CAPTION_SAVE] = "Salvar como";
+      cpt_array[CAPTION_DIRECTORY] = "Selecionar diretório";
+      cpt_array[CAPTION_COLOR] = "Cor";
+      cpt_array[CAPTION_ERROR] = "Erro";
+
+    } else if (ptr[0] == 'a' && ptr[1] == 'r') {
+      // ar = Arabic
+
+      btn_array[BUTTON_ABORT] = "إلغاء";
+      btn_array[BUTTON_IGNORE] = "يتجاهل";
+      btn_array[BUTTON_OK] = "نعم";
+      btn_array[BUTTON_CANCEL] = "يلغي";
+      btn_array[BUTTON_YES] = "نعم";
+      btn_array[BUTTON_NO] = "لا";
+      btn_array[BUTTON_RETRY] = "إعادة المحاولة";
+
+      cpt_array[CAPTION_INFORMATION] = "معلومة";
+      cpt_array[CAPTION_QUESTION] = "سؤال";
+      cpt_array[CAPTION_INPUT] = "استعلام الإدخال";
+      cpt_array[CAPTION_OPEN] = "يفتح";
+      cpt_array[CAPTION_SAVE] = "حفظ باسم";
+      cpt_array[CAPTION_DIRECTORY] = "اختر المجلد";
+      cpt_array[CAPTION_COLOR] = "لون";
+      cpt_array[CAPTION_ERROR] = "خطأ";
+
+    } else if (ptr[0] == 'h' && ptr[1] == 'i') {
+      // hi = Hindi
+
+      btn_array[BUTTON_ABORT] = "बीच में बंद करें";
+      btn_array[BUTTON_IGNORE] = "अनदेखा करना";
+      btn_array[BUTTON_OK] = "ठीक है";
+      btn_array[BUTTON_CANCEL] = "रद्द करना";
+      btn_array[BUTTON_YES] = "हाँ";
+      btn_array[BUTTON_NO] = "नहीं";
+      btn_array[BUTTON_RETRY] = "पुन: प्रयास करें";
+
+      cpt_array[CAPTION_INFORMATION] = "जानकारी";
+      cpt_array[CAPTION_QUESTION] = "सवाल";
+      cpt_array[CAPTION_INPUT] = "इनपुट क्वेरी";
+      cpt_array[CAPTION_OPEN] = "खुला";
+      cpt_array[CAPTION_SAVE] = "के रूप रक्षित करें";
+      cpt_array[CAPTION_DIRECTORY] = "डायरेक्टरी चुनें";
+      cpt_array[CAPTION_COLOR] = "रंग";
+      cpt_array[CAPTION_ERROR] = "गलती";
+
+    } else if (ptr[0] == 'i' && ptr[1] == 't') {
+      // it = Italian
+
+      btn_array[BUTTON_ABORT] = "Interrompi";
+      btn_array[BUTTON_IGNORE] = "Ignorare";
+      btn_array[BUTTON_OK] = "OK";
+      btn_array[BUTTON_CANCEL] = "Cancellare";
+      btn_array[BUTTON_YES] = "SÌ";
+      btn_array[BUTTON_NO] = "NO";
+      btn_array[BUTTON_RETRY] = "Riprova";
+
+      cpt_array[CAPTION_INFORMATION] = "Informazioni";
+      cpt_array[CAPTION_QUESTION] = "Domanda";
+      cpt_array[CAPTION_INPUT] = "Query di input";
+      cpt_array[CAPTION_OPEN] = "Aprire";
+      cpt_array[CAPTION_SAVE] = "Salva con nome";
+      cpt_array[CAPTION_DIRECTORY] = "Seleziona directory";
+      cpt_array[CAPTION_COLOR] = "Colore";
+      cpt_array[CAPTION_ERROR] = "Errore";
+
+    } else if (ptr[0] == 'n' && ptr[1] == 'l') {
+      // nl = Dutch
+
+      btn_array[BUTTON_ABORT] = "Afbreken";
+      btn_array[BUTTON_IGNORE] = "Negeren";
+      btn_array[BUTTON_OK] = "OK";
+      btn_array[BUTTON_CANCEL] = "Annuleren";
+      btn_array[BUTTON_YES] = "Ja";
+      btn_array[BUTTON_NO] = "Nee";
+      btn_array[BUTTON_RETRY] = "Opnieuw proberen";
+
+      cpt_array[CAPTION_INFORMATION] = "Informatie";
+      cpt_array[CAPTION_QUESTION] = "Vraag";
+      cpt_array[CAPTION_INPUT] = "Invoervraag";
+      cpt_array[CAPTION_OPEN] = "Open";
+      cpt_array[CAPTION_SAVE] = "Opslaan als";
+      cpt_array[CAPTION_DIRECTORY] = "Map selecteren";
+      cpt_array[CAPTION_COLOR] = "Kleur";
+      cpt_array[CAPTION_ERROR] = "Fout";
+
+    }
+  }
+}
+
+void *owner = nullptr;
+bool cancel_pressed = false;
+string ws = "Cocoa";
+int msgres;
+int qstres;
+int attemptres;
+int errorres;
+string strres;
+bool done;
+
+string string_replace_all(string str, string substr, string newstr) {
+  size_t pos = 0;
+  const size_t sublen = substr.length(), newlen = newstr.length();
+  while ((pos = str.find(substr, pos)) != string::npos) {
+    str.replace(pos, sublen, newstr);
+    pos += newlen;
+  }
+  return str;
+}
+
+vector<string> string_split(string str, char delimiter) {
+  vector<string> vec;
+  std::stringstream sstr(str);
+  string tmp;
+  while (std::getline(sstr, tmp, delimiter))
+    vec.push_back(tmp);
+  return vec;
+}
+
+string osascript(bool type, string script) {
+  string result;
+  if (!type && [NSThread isMainThread] && [[NSApp windows] count] > 0) {
+    NSDictionary *errorInfo = nullptr;
+    NSString *sourceCode = [NSString stringWithUTF8String:script.c_str()];
+    NSAppleScript *appleScript = [[NSAppleScript alloc] initWithSource:sourceCode];
+    NSAppleEventDescriptor *resultDescriptor = [appleScript executeAndReturnError:&errorInfo];
+    if (!errorInfo) {
+      NSString *resultString = [resultDescriptor stringValue];
+      result = (([resultString UTF8String]) ? [resultString UTF8String] : "");
+    }
+    [appleScript release];
+    return result;
+  }
+  char buf[BUFSIZ];
+  ssize_t nRead = 0;
+  FILE *fp = nullptr;
+  if (type) fp = popen((string("osascript -e \"") + string_replace_all(script, "\"", "\\\"") + string("\" 2> /dev/null")).c_str(), "r");
+  else fp = popen(script.c_str(), "r");
+  if (fp) {
+    #if (defined(USE_SDL_POLLEVENT) || defined(USE_SDL2_POLLEVENT) || defined(USE_SDL3_POLLEVENT))
+    SDL_Event event;
+    #endif
+    while ((nRead = read(fileno(fp), buf, BUFSIZ)) > 0) {
+      buf[nRead] = '\0';
+      result.append(buf, nRead);
+      #if (defined(USE_SDL_POLLEVENT) || defined(USE_SDL2_POLLEVENT) || defined(USE_SDL3_POLLEVENT))
+      while (SDL_PollEvent(&event) > 0);
+      #endif
+    }
+    while (!result.empty() && (isspace(*result.rbegin()) || *result.rbegin() == '\a')) {
+      result.pop_back();
+      #if (defined(USE_SDL_POLLEVENT) || defined(USE_SDL2_POLLEVENT) || defined(USE_SDL3_POLLEVENT))
+      while (SDL_PollEvent(&event) > 0);
+      #endif
+    }
+    string substr = "button returned:";
+    size_t pos = result.find(substr);
+    if (pos != string::npos) {
+      result = result.substr(pos + substr.length());
+    }
+    pclose(fp);
+  }
+  return result;
+}
+
+const char *cocoa_widget_get_owner() {
+  static string str;
+  str = std::to_string((unsigned long long)owner);
+  return str.c_str();
+}
+
+void cocoa_widget_set_owner(const char *hwnd) {
+  owner = (void *)strtoull(hwnd, nullptr, 10);
+}
+
+const char *cocoa_widget_get_button_name(int type) {
+  return dialog_module::widget_get_button_name(type);
+}
+
+int cocoa_show_message(const char *str, bool has_cancel, const char *icon, const char *title) {
+  cancel_pressed = false;
+
+  if (!strcmp(ws.c_str(), "OSAScript") || !owner || ![NSThread isMainThread]) {
+    ws = "OSAScript";
+    static string butres;
+    if ([NSThread isMainThread] && [[NSApp windows] count] > 0) {
+      if (has_cancel) {
+        butres = osascript(false, string("display dialog \"") + string_replace_all(str, "\"", "\\\"") + string("\" with title \"") + string_replace_all(title, "\"", "\\\"") + string("\" buttons {\"") + 
+        string_replace_all(cocoa_widget_get_button_name(BUTTON_OK), "\"", "\\\"") + string("\", \"") + string_replace_all(cocoa_widget_get_button_name(BUTTON_CANCEL), "\"", "\\\"") + string("\"} default button \"") + 
+        string_replace_all(cocoa_widget_get_button_name(BUTTON_OK), "\"", "\\\"") + string("\"\nreturn the button returned of the result\n"));
+      } else {
+        butres = osascript(false, string("display dialog \"") + string_replace_all(str, "\"", "\\\"") + string("\" with title \"") + string_replace_all(title, "\"", "\\\"") + string("\" buttons {\"") + 
+        string_replace_all(cocoa_widget_get_button_name(BUTTON_OK), "\"", "\\\"") + string("\"} default button \"") + string_replace_all(cocoa_widget_get_button_name(BUTTON_OK), "\"", "\\\"") + 
+        string("\"\nreturn the button returned of the result\n"));
+      }
+      if (!butres.compare(cocoa_widget_get_button_name(BUTTON_OK))) {
+        msgres = 1;
+      } else {
+        msgres = -1;
+      }
+    } else {
+      if (has_cancel) {
+        butres = osascript(true, string("display dialog \"") + string(str) + string("\" with title \"") + string(title) + string("\" buttons {\"") + 
+        cocoa_widget_get_button_name(BUTTON_OK) + string("\", \"") + cocoa_widget_get_button_name(BUTTON_CANCEL) + string("\"} default button \"") + 
+        cocoa_widget_get_button_name(BUTTON_OK) + string("\""));
+      } else {
+        butres = osascript(true, string("display dialog \"") + string(str) + string("\" with title \"") + string(title) + string("\" buttons {\"") +
+        cocoa_widget_get_button_name(BUTTON_OK) + string("\"} default button \"") + cocoa_widget_get_button_name(BUTTON_OK) + string("\""));
+      }
+      if (!butres.compare(cocoa_widget_get_button_name(BUTTON_OK))) {
+        msgres = 1;
+      } else {
+        msgres = -1;
+      }
+    }    
+    return msgres;
+  }
+  ws = "Cocoa";
+
+  NSString *myTitle = [NSString stringWithUTF8String:title];
+  NSString *myStr = [NSString stringWithUTF8String:str];
+
+  NSAlert *alert = [[NSAlert alloc] init];
+  NSImage *image = [[NSImage alloc] initWithContentsOfFile:[NSString stringWithUTF8String:icon]];
+  [alert setIcon:image];
+  [alert setMessageText:myTitle];
+  [alert setInformativeText:myStr];
+  [alert addButtonWithTitle:[NSString stringWithUTF8String:cocoa_widget_get_button_name(BUTTON_OK)]];
+  if (has_cancel) [alert addButtonWithTitle:[NSString stringWithUTF8String:cocoa_widget_get_button_name(BUTTON_CANCEL)]];
+  [alert setAlertStyle:(NSAlertStyle)1];
+
+  [alert beginSheetModalForWindow:(NSWindow *)owner completionHandler:^(NSInteger result) {
+
+    if (result == NSAlertFirstButtonReturn) {
+      msgres = 1;
+      [NSApp stopModal];
+    }
+
+    if (result == NSAlertSecondButtonReturn) {
+      msgres = -1;
+      [NSApp stopModal];
+    }
+
+  }];
+
+  [NSApp runModalForWindow:[alert window]];
+
+  [image release];
+  [alert release];
+
+  return msgres;
+}
+
+int cocoa_show_question(const char *str, bool has_cancel, const char *icon, const char *title) {
+  cancel_pressed = false;
+
+  if (!strcmp(ws.c_str(), "OSAScript") || !owner || ![NSThread isMainThread]) {
+    ws = "OSAScript";
+    static string butres;
+
+    if ([NSThread isMainThread] && [[NSApp windows] count] > 0) {
+      if (has_cancel) {
+        butres = osascript(false, string("display dialog \"") + string_replace_all(str, "\"", "\\\"") + string("\" with title \"") + string_replace_all(title, "\"", "\\\"") + string("\" buttons {\"") + 
+        string_replace_all(cocoa_widget_get_button_name(BUTTON_YES), "\"", "\\\"") + string("\", \"") + string_replace_all(cocoa_widget_get_button_name(BUTTON_NO), "\"", "\\\"") + string("\", \"") + 
+        string_replace_all(cocoa_widget_get_button_name(BUTTON_CANCEL), "\"", "\\\"") + string("\"} default button \"") + string_replace_all(cocoa_widget_get_button_name(BUTTON_YES), "\"", "\\\"") + 
+        string("\"\nreturn the button returned of the result\n"));
+      } else {
+        butres = osascript(false, string("display dialog \"") + string_replace_all(str, "\"", "\\\"") + string("\" with title \"") + string_replace_all(title, "\"", "\\\"") + string("\" buttons {\"") + 
+        string_replace_all(cocoa_widget_get_button_name(BUTTON_YES), "\"", "\\\"") + string("\", \"") + string_replace_all(cocoa_widget_get_button_name(BUTTON_NO), "\"", "\\\"") + string("\"} default button \"") + 
+        string_replace_all(cocoa_widget_get_button_name(BUTTON_YES), "\"", "\\\"") + string("\"\nreturn the button returned of the result\n"));
+      }
+      if (!butres.compare(cocoa_widget_get_button_name(BUTTON_YES))) {
+        qstres = 1;
+      } else if (!butres.compare(cocoa_widget_get_button_name(BUTTON_NO))) {
+        qstres = 0;
+      } else {
+        qstres = -1;
+      }  
+    } else {
+      if (has_cancel) {
+        butres = osascript(true, string("display dialog \"") + string(str) + string("\" with title \"") + string(title) + string("\" buttons {\"") + cocoa_widget_get_button_name(BUTTON_YES) + string("\", \"") + 
+        cocoa_widget_get_button_name(BUTTON_NO) + string("\", \"") + cocoa_widget_get_button_name(BUTTON_CANCEL) + string("\"} default button \"") + cocoa_widget_get_button_name(BUTTON_YES) + string("\""));
+      } else {
+        butres = osascript(true, string("display dialog \"") + string(str) + string("\" with title \"") + string(title) + string("\" buttons {\"") + cocoa_widget_get_button_name(BUTTON_YES) + string("\", \"") + 
+        cocoa_widget_get_button_name(BUTTON_NO) + string("\"} default button \"") + cocoa_widget_get_button_name(BUTTON_YES) + string("\""));
+      }
+      if (!butres.compare(cocoa_widget_get_button_name(BUTTON_YES))) {
+        qstres = 1;
+      } else if (!butres.compare(cocoa_widget_get_button_name(BUTTON_NO))) {
+        qstres = 0;
+      } else {
+        qstres = -1;
+      }  
+    }   
+    return qstres;
+  }
+  ws = "Cocoa";
+
+  NSString *myTitle = [NSString stringWithUTF8String:title];
+  NSString *myStr = [NSString stringWithUTF8String:str];
+
+  NSAlert *alert = [[NSAlert alloc] init];
+  NSImage *image = [[NSImage alloc] initWithContentsOfFile:[NSString stringWithUTF8String:icon]];
+  [alert setIcon:image];
+  [alert setMessageText:myTitle];
+  [alert setInformativeText:myStr];
+  [alert addButtonWithTitle:[NSString stringWithUTF8String:cocoa_widget_get_button_name(BUTTON_YES)]];
+  [alert addButtonWithTitle:[NSString stringWithUTF8String:cocoa_widget_get_button_name(BUTTON_NO)]];
+  if (has_cancel) [alert addButtonWithTitle:[NSString stringWithUTF8String:cocoa_widget_get_button_name(BUTTON_CANCEL)]];
+  [alert setAlertStyle:(NSAlertStyle)1];
+
+  [alert beginSheetModalForWindow:(NSWindow *)owner completionHandler:^(NSInteger result) {
+
+    if (result == NSAlertFirstButtonReturn) {
+      qstres = 1;
+      [NSApp stopModal];
+    }
+
+    if (result == NSAlertSecondButtonReturn) {
+      qstres = 0;
+      [NSApp stopModal];
+    }
+
+    if (result == NSAlertThirdButtonReturn) {
+      qstres = -1;
+      [NSApp stopModal];
+    }
+
+  }];
+    
+  [NSApp runModalForWindow:[alert window]];
+
+  [image release];
+  [alert release];
+
+  return qstres;
+}
+
+int cocoa_show_attempt(const char *str, const char *icon, const char *title) {
+  cancel_pressed = false;
+
+  if (!strcmp(ws.c_str(), "OSAScript") || !owner || ![NSThread isMainThread]) {
+    ws = "OSAScript";
+    static string butres;
+    if ([NSThread isMainThread] && [[NSApp windows] count] > 0) {
+      butres = osascript(false, string("display dialog \"") + string_replace_all(str, "\"", "\\\"") + string("\" with title \"") + string_replace_all(title, "\"", "\\\"") + string("\" with icon caution buttons {\"") + 
+      string_replace_all(cocoa_widget_get_button_name(BUTTON_RETRY), "\"", "\\\"") + string("\", \"") + string_replace_all(cocoa_widget_get_button_name(BUTTON_CANCEL), "\"", "\\\"") + string("\"} default button \"") + 
+      string_replace_all(cocoa_widget_get_button_name(BUTTON_RETRY), "\"", "\\\"") + string("\"\nreturn the button returned of the result\n"));
+      if (!butres.compare(cocoa_widget_get_button_name(BUTTON_RETRY))) {
+        attemptres = 0;
+      } else {
+        attemptres = -1;
+      }
+    } else {
+      butres = osascript(true, string("display dialog \"") + string(str) + string("\" with title \"") + string(title) + string("\" with icon caution buttons {\"") + 
+      cocoa_widget_get_button_name(BUTTON_RETRY) + string("\", \"") + cocoa_widget_get_button_name(BUTTON_CANCEL) + string("\"} default button \"") + 
+      cocoa_widget_get_button_name(BUTTON_RETRY) + string("\""));
+      if (!butres.compare(cocoa_widget_get_button_name(BUTTON_RETRY))) {
+        attemptres = 0;
+      } else {
+        attemptres = -1;
+      }
+    } 
+    return attemptres;
+  }
+  ws = "Cocoa";
+
+  NSString *myStr = [NSString stringWithUTF8String:str];
+  NSAlert *alert = [[NSAlert alloc] init];
+  NSImage *image = [[NSImage alloc] initWithContentsOfFile:[NSString stringWithUTF8String:icon]];
+  [alert setIcon:image];
+  [alert setMessageText:@"Error"];
+
+  if (![[NSString stringWithUTF8String:title] isEqualToString:@""])
+    [alert setMessageText:[NSString stringWithUTF8String:title]];
+
+  [alert setInformativeText:myStr];
+  [alert addButtonWithTitle:[NSString stringWithUTF8String:cocoa_widget_get_button_name(BUTTON_RETRY)]];
+  [alert addButtonWithTitle:[NSString stringWithUTF8String:cocoa_widget_get_button_name(BUTTON_CANCEL)]];
+  [alert setAlertStyle:(NSAlertStyle)2];
+
+  [alert beginSheetModalForWindow:(NSWindow *)owner completionHandler:^(NSInteger result) {
+
+    if (result == NSAlertFirstButtonReturn) {
+      attemptres = 0;
+      [NSApp stopModal];
+    }
+
+    if (result == NSAlertSecondButtonReturn) {
+      attemptres = -1;
+      [NSApp stopModal];
+    }
+
+  }];
+
+  [NSApp runModalForWindow:[alert window]];
+    
+  [image release];
+  [alert release];
+
+  return attemptres;
+}
+
+int cocoa_show_error(const char *str, bool _abort, const char *icon, const char *title) {
+  cancel_pressed = false;
+
+  if (!strcmp(ws.c_str(), "OSAScript") || !owner || ![NSThread isMainThread]) {
+    ws = "OSAScript";
+    static string butres;
+    if ([NSThread isMainThread] && [[NSApp windows] count] > 0) {
+      if (!_abort) {
+        butres = osascript(false, string("display dialog \"") + string_replace_all(str, "\"", "\\\"") + string("\" with title \"") + string_replace_all(title, "\"", "\\\"") + string("\" with icon caution buttons {\"") + 
+        string_replace_all(cocoa_widget_get_button_name(BUTTON_ABORT), "\"", "\\\"") + string("\", \"") + string_replace_all(cocoa_widget_get_button_name(BUTTON_IGNORE), "\"", "\\\"") + string("\"} default button \"") + 
+        string_replace_all(cocoa_widget_get_button_name(BUTTON_ABORT), "\"", "\\\"") + string("\"\nreturn the button returned of the result\n"));
+      } else {
+        butres = osascript(false, string("display dialog \"") + string_replace_all(str, "\"", "\\\"") + string("\" with title \"") + string_replace_all(title, "\"", "\\\"") + string("\" with icon caution buttons {\"") + 
+        string_replace_all(cocoa_widget_get_button_name(BUTTON_ABORT), "\"", "\\\"") + string("\"} default button \"") + string_replace_all(cocoa_widget_get_button_name(BUTTON_ABORT), "\"", "\\\"") + 
+        string("\"\nreturn the button returned of the result\n"));
+      }
+      if (!butres.compare(cocoa_widget_get_button_name(BUTTON_ABORT))) {
+        exit(0);
+      } else {
+        errorres = -1;
+      }
+    } else {
+      if (!_abort) {
+        butres = osascript(true, string("display dialog \"") + string(str) + string("\" with title \"") + string(title) + string("\" with icon caution buttons {\"") + 
+        cocoa_widget_get_button_name(BUTTON_ABORT) + string("\", \"") + cocoa_widget_get_button_name(BUTTON_IGNORE) + string("\"} default button \"") + 
+        cocoa_widget_get_button_name(BUTTON_ABORT) + string("\""));
+      } else {
+        butres = osascript(true, string("display dialog \"") + string(str) + string("\" with title \"") + string(title) + string("\" with icon caution buttons {\"") + 
+        cocoa_widget_get_button_name(BUTTON_ABORT) + string("\"} default button \"") + cocoa_widget_get_button_name(BUTTON_ABORT) + string("\""));
+      }
+      if (!butres.compare(cocoa_widget_get_button_name(BUTTON_ABORT))) {
+        exit(0);
+      } else {
+        errorres = -1;
+      }
+    }
+    return errorres;
+  }
+  ws = "Cocoa";
+
+  NSString *myStr = [NSString stringWithUTF8String:str];
+  NSAlert *alert = [[NSAlert alloc] init];
+  NSImage *image = [[NSImage alloc] initWithContentsOfFile:[NSString stringWithUTF8String:icon]];
+  [alert setIcon:image];
+  [alert setMessageText:@"Error"];
+
+  if (![[NSString stringWithUTF8String:title] isEqualToString:@""])
+    [alert setMessageText:[NSString stringWithUTF8String:title]];
+
+  [alert setInformativeText:myStr];
+  [alert addButtonWithTitle:[NSString stringWithUTF8String:cocoa_widget_get_button_name(BUTTON_ABORT)]];
+  if (!_abort) [alert addButtonWithTitle:[NSString stringWithUTF8String:cocoa_widget_get_button_name(BUTTON_IGNORE)]];
+  [alert setAlertStyle:(NSAlertStyle)2];
+    
+  [alert beginSheetModalForWindow:(NSWindow *)owner completionHandler:^(NSInteger result) {
+        
+    if (result == NSAlertFirstButtonReturn) {
+      exit(0);
+    }
+
+    if (result == NSAlertSecondButtonReturn) {
+      errorres = -1;
+      [NSApp stopModal];
+    }
+
+  }];
+
+  [NSApp runModalForWindow:[alert window]];
+
+  [image release];
+  [alert release];
+
+  return errorres;
+}
+
+const char *cocoa_input_box(const char *str, const char *def, const char *icon, const char *title, bool numbers) {
+  cancel_pressed = false;
+
+  if (!strcmp(ws.c_str(), "OSAScript") || !owner || ![NSThread isMainThread]) {
+    ws = "OSAScript";
+    static string strres;
+    if ([NSThread isMainThread] && [[NSApp windows] count] > 0) {
+      strres = osascript(false, string("display dialog \"") + string_replace_all(str, "\"", "\\\"") + string("\" with title \"") + 
+      string_replace_all(title, "\"", "\\\"") + string("\" default answer \"") + string_replace_all(def, "\"", "\\\"") + 
+      string("\"\nreturn the text returned of the result\n"));
+      if (!strres.empty()) {
+        cancel_pressed = false;
+        return strres.c_str();
+      } else {
+        strres.clear();
+        cancel_pressed = true;
+        return strres.c_str();
+      }
+    } else {
+      strres = osascript(true, string("text returned of (display dialog \"") + string(str) + string("\" with title \"") + string(title) + 
+      string("\" default answer \"") + string(def) + string("\")"));
+      if (!strres.empty()) {
+        cancel_pressed = false;
+        return strres.c_str();
+      } else {
+        strres.clear();
+        cancel_pressed = true;
+        return strres.c_str();
+      }
+    }
+  }
+  ws = "Cocoa";
+
+  NSString *myTitle = [NSString stringWithUTF8String:title];
+  NSString *myStr = [NSString stringWithUTF8String:str];
+  NSString *myDef = [NSString stringWithUTF8String:def];
+
+  NSAlert *alert = [[NSAlert alloc] init];
+  NSImage *image = [[NSImage alloc] initWithContentsOfFile:[NSString stringWithUTF8String:icon]];
+  [alert setIcon:image];
+  [alert setMessageText:myTitle];
+  [alert setInformativeText:myStr];
+  [alert addButtonWithTitle:[NSString stringWithUTF8String:cocoa_widget_get_button_name(BUTTON_OK)]];
+  [alert addButtonWithTitle:[NSString stringWithUTF8String:cocoa_widget_get_button_name(BUTTON_CANCEL)]];
+
+  NSTextField *input = [[NSTextField alloc] initWithFrame:NSMakeRect(0, 0, 300, 22)];
+  [[input cell] setWraps:NO];
+  [[input cell] setScrollable:YES];
+  [input setMaximumNumberOfLines:1];
+  [input setStringValue:myDef];
+  [alert setAccessoryView:input];
+  NSView *myAccessoryView = [alert accessoryView];
+  [[alert window] setInitialFirstResponder:myAccessoryView];
+
+  [alert beginSheetModalForWindow:(NSWindow *)owner completionHandler:^(NSInteger result) {
+
+    if (result == NSAlertFirstButtonReturn) {
+      [input validateEditing];
+      strres = [[input stringValue] UTF8String];
+      cancel_pressed = false;
+      [NSApp stopModal];
+    } else if (result == NSAlertSecondButtonReturn) {
+      strres.clear();
+      cancel_pressed = true;
+      [NSApp stopModal];
+    }
+
+  }];
+
+  [NSApp runModalForWindow:[alert window]];
+
+  [input release];
+  [image release];
+  [alert release];
+
+  if (strcmp(strres.c_str(), "") == 0) {
+    cancel_pressed = true;
+  }
+
+  return strres.c_str();
+}
+
+const char *cocoa_password_box(const char *str, const char *def, const char *icon, const char *title, bool numbers) {
+  cancel_pressed = false;
+
+  if (!strcmp(ws.c_str(), "OSAScript") || !owner || ![NSThread isMainThread]) {
+    ws = "OSAScript";
+    static string strres;
+    if ([NSThread isMainThread] && [[NSApp windows] count] > 0) {
+      strres = osascript(false, string("display dialog \"") + string_replace_all(str, "\"", "\\\"") + string("\" with title \"") + 
+      string_replace_all(title, "\"", "\\\"") + string("\" default answer \"") + string_replace_all(def, "\"", "\\\"") + 
+      string("\" with hidden answer\nreturn the text returned of the result\n"));
+      if (!strres.empty()) {
+        cancel_pressed = false;
+        return strres.c_str();
+      } else {
+        strres.clear();
+        cancel_pressed = true;
+        return strres.c_str();
+      }
+    } else {
+      strres = osascript(true, string("text returned of (display dialog \"") + string(str) + string("\" with title \"") + 
+      string(title) + string("\" default answer \"") + string(def) + string("\" with hidden answer)"));
+      if (!strres.empty()) {
+        cancel_pressed = false;
+        return strres.c_str();
+      } else {
+        strres.clear();
+        cancel_pressed = true;
+        return strres.c_str();
+      }
+    }
+  }
+  ws = "Cocoa";
+
+  NSString *myTitle = [NSString stringWithUTF8String:title];
+  NSString *myStr = [NSString stringWithUTF8String:str];
+  NSString *myDef = [NSString stringWithUTF8String:def];
+
+  NSAlert *alert = [[NSAlert alloc] init];
+  NSImage *image = [[NSImage alloc] initWithContentsOfFile:[NSString stringWithUTF8String:icon]];
+  [alert setIcon:image];
+  [alert setMessageText:myTitle];
+  [alert setInformativeText:myStr];
+  [alert addButtonWithTitle:[NSString stringWithUTF8String:cocoa_widget_get_button_name(BUTTON_OK)]];
+  [alert addButtonWithTitle:[NSString stringWithUTF8String:cocoa_widget_get_button_name(BUTTON_CANCEL)]];
+
+  NSSecureTextField *input = [[NSSecureTextField alloc] initWithFrame:NSMakeRect(0, 0, 300, 22)];
+  [[input cell] setWraps:NO];
+  [[input cell] setScrollable:YES];
+  [input setMaximumNumberOfLines:1];
+  [input setStringValue:myDef];
+  [alert setAccessoryView:input];
+  NSView *myAccessoryView = [alert accessoryView];
+  [[alert window] setInitialFirstResponder:myAccessoryView];
+
+  [alert beginSheetModalForWindow:(NSWindow *)owner completionHandler:^(NSInteger result) {
+
+    if (result == NSAlertFirstButtonReturn) {
+      [input validateEditing];
+      strres = [[input stringValue] UTF8String];
+      cancel_pressed = false;
+      [NSApp stopModal];
+    } else if (result == NSAlertSecondButtonReturn) {
+      strres.clear();
+      cancel_pressed = true;
+      [NSApp stopModal];
+    }
+
+  }];
+
+  [NSApp runModalForWindow:[alert window]];
+
+  [input release];
+  [image release];
+  [alert release];
+
+  if (strcmp(strres.c_str(), "") == 0) {
+    cancel_pressed = true;
+  }
+
+  return strres.c_str();
+}
+
+std::string theOpenResult;
+bool initOpenAccessory;
+NSString *selectedOpenPattern;
+int openPopIndex;
+NSArray *openPatternItems;
+const char *cocoa_get_open_filename(const char *filter, const char *fname, const char *dir, const char *title, bool mselect) {
+  cancel_pressed = false;
+
+  if (!strcmp(ws.c_str(), "OSAScript") || !owner || ![NSThread isMainThread]) {
+    ws = "OSAScript";
+    static string script;
+    string extensions;
+    theOpenResult.clear();
+    const char *home = getenv("HOME");
+    string location = ((!string(dir).empty()) ? dir : ((home) ? home : "/"));
+    if (mselect) {
+      string exts = string_replace_all(filter, "*.", "");
+      vector<string> vec1 = string_split(exts, '|');
+      if (string(filter).empty() || (!vec1.empty() && vec1.size() == 2 && vec1[1] == "*")) {
+        if ([NSThread isMainThread] && [[NSApp windows] count] > 0) {
+          script = string(R"(set output to ""
+set targetFolder to (POSIX file ")") + location + string(R"(") as alias
+set theFiles to choose file with prompt ")") + string(title) + string(R"(" with multiple selections allowed default location targetFolder
+repeat with aFile in theFiles
+    set output to output & (POSIX path of aFile) & linefeed
+end repeat
+return output
+)");
+        } else {
+          script = string(R"(osascript 2> /dev/null << 'EOF'
+set output to ""
+set targetFolder to (POSIX file ")") + location + string(R"(") as alias
+set theFiles to choose file with prompt ")") + string(title) + string(R"(" with multiple selections allowed default location targetFolder
+repeat with aFile in theFiles
+    set output to output & (POSIX path of aFile) & linefeed
+end repeat
+return output
+EOF
+)");
+        }
+      } else if (!string(filter).empty() && !vec1.empty() && vec1.size() >= 2) {
+        vector<string> vec3;
+        for (int i = 0; i < vec1.size(); i++) {
+          if (i % 2 != 0) {
+            vector<string> vec2 = string_split(vec1[i], ';');
+            for (int j = 0; j < vec2.size(); j++) {
+              if (vec2[j].compare("*")) {
+                vec3.push_back(vec2[j]);
+              }
+            }
+          }
+        }
+        for (int i = 0; i < vec3.size(); i++) {
+          if (i < vec3.size() - 1) {
+            extensions += string("\"") + vec3[i] + string("\", ");
+          } else {
+            extensions += string("\"") + vec3[i] + string("\"");
+          }
+        }
+        if ([NSThread isMainThread] && [[NSApp windows] count] > 0) {
+          script = string(R"(set output to ""
+set targetFolder to (POSIX file ")") + location + string(R"(") as alias
+set theFiles to choose file with prompt ")") + string(title) + string(R"(" of type {)") + extensions + string(R"(} with multiple selections allowed default location targetFolder
+repeat with aFile in theFiles
+    set output to output & (POSIX path of aFile) & linefeed
+end repeat
+return output
+)");
+        } else {
+          script = string(R"(osascript 2> /dev/null << 'EOF'
+set output to ""
+set targetFolder to (POSIX file ")") + location + string(R"(") as alias
+set theFiles to choose file with prompt ")") + string(title) + string(R"(" of type {)") + extensions + string(R"(} with multiple selections allowed default location targetFolder
+repeat with aFile in theFiles
+    set output to output & (POSIX path of aFile) & linefeed
+end repeat
+return output
+EOF
+)");
+        }
+      }
+    } else {
+      string exts = string_replace_all(filter, "*.", "");
+      vector<string> vec1 = string_split(exts, '|');
+      if (string(filter).empty() || (!vec1.empty() && vec1.size() == 2 && vec1[1] == "*")) {
+        if ([NSThread isMainThread] && [[NSApp windows] count] > 0) {
+          script = string(R"(set output to ""
+set targetFolder to (POSIX file ")") + location + string(R"(") as alias
+set aFile to choose file with prompt ")") + string(title) + string(R"(" default location targetFolder
+set output to (POSIX path of aFile) & linefeed
+return output
+)");
+        } else {
+          script = string(R"(osascript 2> /dev/null << 'EOF'
+set output to ""
+set targetFolder to (POSIX file ")") + location + string(R"(") as alias
+set aFile to choose file with prompt ")") + string(title) + string(R"(" default location targetFolder
+set output to (POSIX path of aFile) & linefeed
+return output
+EOF
+)");
+        }
+      } else if (!string(filter).empty() && !vec1.empty() && vec1.size() >= 2) {
+        vector<string> vec3;
+        for (int i = 0; i < vec1.size(); i++) {
+          if (i % 2 != 0) {
+            vector<string> vec2 = string_split(vec1[i], ';');
+            for (int j = 0; j < vec2.size(); j++) {
+              if (vec2[j].compare("*")) {
+                vec3.push_back(vec2[j]);
+              }
+            }
+          }
+        }
+        for (int i = 0; i < vec3.size(); i++) {
+          if (i < vec3.size() - 1) {
+            extensions += string("\"") + vec3[i] + string("\", ");
+          } else {
+            extensions += string("\"") + vec3[i] + string("\"");
+          }
+        }
+        if ([NSThread isMainThread] && [[NSApp windows] count] > 0) {
+          script = string(R"(set output to ""
+set targetFolder to (POSIX file ")") + location + string(R"(") as alias
+set aFile to choose file with prompt ")") + string(title) + string(R"(" of type {)") + extensions + string(R"(} default location targetFolder
+set output to (POSIX path of aFile) & linefeed
+return output
+)");
+        } else {
+          script = string(R"(osascript 2> /dev/null << 'EOF'
+set output to ""
+set targetFolder to (POSIX file ")") + location + string(R"(") as alias
+set aFile to choose file with prompt ")") + string(title) + string(R"(" of type {)") + extensions + string(R"(} default location targetFolder
+set output to (POSIX path of aFile) & linefeed
+return output
+EOF
+)");
+        }
+      }
+    }
+    theOpenResult = osascript(false, script);
+    return theOpenResult.c_str();
+  }
+  ws = "Cocoa";
+
+  if (@available(macOS 11.0, *)) {
+    cancel_pressed = false;
+  
+    NSOpenPanel *oFilePanel = [NSOpenPanel openPanel];
+    [oFilePanel setMessage:[NSString stringWithUTF8String:title]];
+    [oFilePanel setDirectoryURL:[NSURL fileURLWithPath:[NSString stringWithUTF8String:dir]]];
+    [oFilePanel setCanChooseFiles:YES];
+    [oFilePanel setCanChooseDirectories:NO];
+    [oFilePanel setCanCreateDirectories:NO];
+    [oFilePanel setResolvesAliases:YES];
+  
+    if (mselect)
+      [oFilePanel setAllowsMultipleSelection:YES];
+    else
+      [oFilePanel setAllowsMultipleSelection:NO];
+  
+    NSView *openView = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 431, 21)];
+    NSPopUpButton *openPop = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(104, 0, 255, 22)];
+    NSString *openFilter = [NSString stringWithUTF8String:filter];
+    bool openShowAccessory = true;
+    bool openAllowAllFiles = false;
+  
+    if ([openFilter length] == 0 ||
+      ([openFilter rangeOfString:@"|"].location != NSNotFound &&
+      [openFilter rangeOfString:@"|"].location == 0))
+      openShowAccessory = false;
+  
+    if ([openFilter length] == 0 ||
+      [openFilter rangeOfString:@"|"].location == NSNotFound) {
+      openFilter = [openFilter stringByAppendingString:@"|"];
+      openAllowAllFiles = true;
+    }
+  
+    int openIndex = 0;
+    int openCount = 0, openLength = [openFilter length];
+    NSRange openRange = NSMakeRange(0, openLength);
+  
+    while (openRange.location != NSNotFound) {
+      openRange = [openFilter rangeOfString: @"|" options:0 range:openRange];
+  
+      if (openRange.location != NSNotFound) {
+        openRange = NSMakeRange(openRange.location + openRange.length, openLength - (openRange.location + openRange.length));
+        openCount += 1;
+      }
+    }
+  
+    NSString *openPattern = openFilter;
+    openPattern = [openPattern stringByReplacingOccurrencesOfString:@"*." withString:@""];
+    openPattern = [openPattern stringByReplacingOccurrencesOfString:@" " withString:@""];
+  
+    NSArray *openArray1 = [openFilter componentsSeparatedByString:@"|"];
+    NSArray *openArray2 = [openPattern componentsSeparatedByString:@"|"];
+    NSMutableArray *openPatternArray = [[NSMutableArray alloc] init];
+    NSMutableArray *openDescrArray = [[NSMutableArray alloc] init];
+  
+    for (openIndex = 0; openIndex <= openCount; openIndex += 1) {
+      if (openIndex % 2) {
+        [openPatternArray addObject:[openArray2 objectAtIndex:openIndex]];
+      } else {
+        [openDescrArray addObject:[openArray1 objectAtIndex:openIndex]];
+      }
+    }
+  
+    selectedOpenPattern = [openPatternArray objectAtIndex:0];
+    openPatternItems = [selectedOpenPattern componentsSeparatedByString:@";"];
+  
+    NSMutableArray<UTType *> *contentTypes = [[NSMutableArray alloc] init];
+  
+    for (std::size_t i = 0; i < [openPatternItems count]; i++) {
+      NSString *ext = [openPatternItems objectAtIndex:i];
+      if (UTType *type = [UTType typeWithFilenameExtension:ext]) {
+        [contentTypes addObject:type];
+      }
+    }
+      
+    [oFilePanel setAllowedContentTypes:contentTypes];
+    [contentTypes release];
+  
+    if ([openPatternItems containsObject:@"*"] || openAllowAllFiles || !openShowAccessory) {
+      [oFilePanel setAllowedContentTypes:@[]];
+    }
+  
+    [openPop addItemsWithTitles:openDescrArray];
+    [openPop selectItemWithTitle:[openDescrArray objectAtIndex:0]];
+    [openView addSubview:openPop];
+    [oFilePanel setAccessoryView:openView];
+  
+    if (!openShowAccessory)
+      [oFilePanel setAccessoryView:nullptr];
+  
+    initOpenAccessory = false;
+    openPopIndex = 0;
+  
+    [oFilePanel beginSheetModalForWindow:(NSWindow *)owner completionHandler:^(NSInteger result) {
+      if (result == NSModalResponseOK) {
+        NSURL *theOpenURL;
+        NSString *theOpenFile;
+        int openURLSize = [[oFilePanel URLs] count];
+  
+        if (openURLSize > 1) {
+          NSMutableArray *openFileArray = [[NSMutableArray alloc] init];
+  
+          for (int openURLIndex = 0; openURLIndex < openURLSize; openURLIndex += 1) {
+            [openFileArray addObject:[[[oFilePanel URLs] objectAtIndex:openURLIndex] path]];
+          }
+  
+          theOpenFile = [openFileArray componentsJoinedByString:@"\n"];
+          [openFileArray release];
+        } else
+          theOpenFile = [[[oFilePanel URLs] objectAtIndex:0] path];
+  
+        theOpenResult = [theOpenFile UTF8String];
+      } else if (result == NSModalResponseCancel)
+        theOpenResult.clear();
+  
+    }];
+  
+    NSModalSession openSession = [NSApp beginModalSessionForWindow:oFilePanel];
+  
+    for (;;) {
+  
+      if ([NSApp runModalSession:openSession] != NSModalResponseContinue)
+        break;
+  
+      if (![oFilePanel isAccessoryViewDisclosed] && !initOpenAccessory) {
+        [oFilePanel setAccessoryViewDisclosed:YES];
+        initOpenAccessory = true;
+      }
+  
+      if (openShowAccessory) {
+        if ([openPop indexOfSelectedItem] != openPopIndex) {
+          selectedOpenPattern = [openPatternArray objectAtIndex:[openPop indexOfSelectedItem]];
+          openPatternItems = [selectedOpenPattern componentsSeparatedByString:@";"];
+              
+          if ([openPatternItems containsObject:@"*"]) {
+            [oFilePanel setAllowedContentTypes:@[]];
+          } else {
+            NSMutableArray<UTType *> *contentTypes = [[NSMutableArray alloc] init];
+          
+            for (std::size_t i = 0; i < [openPatternItems count]; i++) {
+              NSString *ext = [openPatternItems objectAtIndex:i];
+              if (UTType *type = [UTType typeWithFilenameExtension:ext]) {
+                [contentTypes addObject:type];
+              }
+            }
+                
+            [oFilePanel setAllowedContentTypes:contentTypes];
+            [contentTypes release];
+          }
+  
+          openPopIndex = [openPop indexOfSelectedItem];
+        }
+      }
+    }
+  
+    [NSApp endModalSession:openSession];
+  
+    [oFilePanel close];
+  
+    [openPatternArray release];
+    [openDescrArray release];
+    [openPop release];
+    [openView release];
+  
+  } else {
+
+    NSOpenPanel *oFilePanel = [NSOpenPanel openPanel];
+    [oFilePanel setMessage:[NSString stringWithUTF8String:title]];
+    [oFilePanel setDirectoryURL:[NSURL fileURLWithPath:[NSString stringWithUTF8String:dir]]];
+    [oFilePanel setCanChooseFiles:YES];
+    [oFilePanel setCanChooseDirectories:NO];
+    [oFilePanel setCanCreateDirectories:NO];
+    [oFilePanel setResolvesAliases:YES];
+  
+    if (mselect)
+      [oFilePanel setAllowsMultipleSelection:YES];
+    else
+      [oFilePanel setAllowsMultipleSelection:NO];
+  
+    NSView *openView = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 431, 21)];
+    NSPopUpButton *openPop = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(104, 0, 255, 22)];
+    NSString *openFilter = [NSString stringWithUTF8String:filter];
+    bool openShowAccessory = true;
+    bool openAllowAllFiles = false;
+  
+    if ([openFilter length] == 0 ||
+      ([openFilter rangeOfString:@"|"].location != NSNotFound &&
+       [openFilter rangeOfString:@"|"].location == 0))
+      openShowAccessory = false;
+  
+    if ([openFilter length] == 0 ||
+      [openFilter rangeOfString:@"|"].location == NSNotFound) {
+      openFilter = [openFilter stringByAppendingString:@"|"];
+      openAllowAllFiles = true;
+    }
+  
+    int openIndex = 0;
+    int openCount = 0, openLength = [openFilter length];
+    NSRange openRange = NSMakeRange(0, openLength);
+  
+    while (openRange.location != NSNotFound) {
+      openRange = [openFilter rangeOfString: @"|" options:0 range:openRange];
+  
+      if (openRange.location != NSNotFound) {
+        openRange = NSMakeRange(openRange.location + openRange.length, openLength - (openRange.location + openRange.length));
+        openCount += 1;
+      }
+    }
+  
+    NSString *openPattern = openFilter;
+    openPattern = [openPattern stringByReplacingOccurrencesOfString:@"*." withString:@""];
+    openPattern = [openPattern stringByReplacingOccurrencesOfString:@" " withString:@""];
+  
+    NSArray *openArray1 = [openFilter componentsSeparatedByString:@"|"];
+    NSArray *openArray2 = [openPattern componentsSeparatedByString:@"|"];
+    NSMutableArray *openPatternArray = [[NSMutableArray alloc] init];
+    NSMutableArray *openDescrArray = [[NSMutableArray alloc] init];
+  
+    for (openIndex = 0; openIndex <= openCount; openIndex += 1) {
+      if (openIndex % 2) {
+        [openPatternArray addObject:[openArray2 objectAtIndex:openIndex]];
+      } else {
+        [openDescrArray addObject:[openArray1 objectAtIndex:openIndex]];
+      }
+    }
+  
+    selectedOpenPattern = [openPatternArray objectAtIndex:0];
+    openPatternItems = [selectedOpenPattern componentsSeparatedByString:@";"];
+    #pragma GCC diagnostic push
+    #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+    #pragma clang diagnostic push
+    #pragma clang diagnostic ignored "-Wdeprecated-declarations"
+    [oFilePanel setAllowedFileTypes:openPatternItems];
+    #pragma clang diagnostic pop
+    #pragma GCC diagnostic pop
+
+  
+    if ([openPatternItems containsObject:@"*"] || openAllowAllFiles || !openShowAccessory)
+      #pragma GCC diagnostic push
+      #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+      #pragma clang diagnostic push
+      #pragma clang diagnostic ignored "-Wdeprecated-declarations"
+      [oFilePanel setAllowedFileTypes:nullptr];
+      #pragma clang diagnostic pop
+      #pragma GCC diagnostic pop
+  
+    [openPop addItemsWithTitles:openDescrArray];
+    [openPop selectItemWithTitle:[openDescrArray objectAtIndex:0]];
+    [openView addSubview:openPop];
+    [oFilePanel setAccessoryView:openView];
+  
+    if (!openShowAccessory)
+      [oFilePanel setAccessoryView:nullptr];
+  
+    initOpenAccessory = false;
+    openPopIndex = 0;
+  
+    [oFilePanel beginSheetModalForWindow:(NSWindow *)owner completionHandler:^(NSInteger result) {
+      if (result == NSModalResponseOK) {
+        NSURL *theOpenURL;
+        NSString *theOpenFile;
+        int openURLSize = [[oFilePanel URLs] count];
+  
+        if (openURLSize > 1) {
+          NSMutableArray *openFileArray = [[NSMutableArray alloc] init];
+  
+          for (int openURLIndex = 0; openURLIndex < openURLSize; openURLIndex += 1) {
+            [openFileArray addObject:[[[oFilePanel URLs] objectAtIndex:openURLIndex] path]];
+          }
+  
+          theOpenFile = [openFileArray componentsJoinedByString:@"\n"];
+          [openFileArray release];
+        } else
+          theOpenFile = [[[oFilePanel URLs] objectAtIndex:0] path];
+  
+        theOpenResult = [theOpenFile UTF8String];
+      } else if (result == NSModalResponseCancel)
+        theOpenResult.clear();
+  
+    }];
+  
+    NSModalSession openSession = [NSApp beginModalSessionForWindow:oFilePanel];
+  
+    for (;;) {
+  
+      if ([NSApp runModalSession:openSession] != NSModalResponseContinue)
+        break;
+  
+      if (![oFilePanel isAccessoryViewDisclosed] && !initOpenAccessory) {
+        [oFilePanel setAccessoryViewDisclosed:YES];
+        initOpenAccessory = true;
+      }
+  
+      if (openShowAccessory) {
+        if ([openPop indexOfSelectedItem] != openPopIndex) {
+          selectedOpenPattern = [openPatternArray objectAtIndex:[openPop indexOfSelectedItem]];
+          openPatternItems = [selectedOpenPattern componentsSeparatedByString:@";"];
+  
+          if ([openPatternItems containsObject:@"*"])
+            #pragma GCC diagnostic push
+            #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+            #pragma clang diagnostic push
+            #pragma clang diagnostic ignored "-Wdeprecated-declarations"
+            [oFilePanel setAllowedFileTypes:nullptr];
+            #pragma clang diagnostic pop
+            #pragma GCC diagnostic pop
+          else
+            #pragma GCC diagnostic push
+            #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+            #pragma clang diagnostic push
+            #pragma clang diagnostic ignored "-Wdeprecated-declarations"
+            [oFilePanel setAllowedFileTypes:openPatternItems];
+            #pragma clang diagnostic pop
+            #pragma GCC diagnostic pop
+  
+          openPopIndex = [openPop indexOfSelectedItem];
+        }
+      }
+    }
+  
+    [NSApp endModalSession:openSession];
+  
+    [oFilePanel close];
+  
+    [openPatternArray release];
+    [openDescrArray release];
+    [openPop release];
+    [openView release];
+  
+  }
+  return theOpenResult.c_str();
+}
+
+std::string theSaveResult;
+NSString *selectedSavePattern;
+NSArray *savePatternItems;
+int savePopIndex;
+const char *cocoa_get_save_filename(const char *filter, const char *fname, const char *dir, const char *title) {
+  cancel_pressed = false;
+
+  if (!strcmp(ws.c_str(), "OSAScript") || !owner || ![NSThread isMainThread]) {
+    ws = "OSAScript";
+    static string script;
+    theSaveResult.clear();
+    const char *home = getenv("HOME");
+    string location = ((!string(dir).empty()) ? dir : ((home) ? home : "/"));
+    if ([NSThread isMainThread] && [[NSApp windows] count] > 0) {
+      script = string(R"(set output to ""
+set targetFile to ")") + string(fname) + string(R"("
+set targetFolder to (POSIX file ")") + location + string(R"(") as alias
+set aFile to choose file name with prompt ")") + string(title) + string(R"(" default name targetFile default location targetFolder
+set output to (POSIX path of aFile) & linefeed
+return output
+)");
+    } else {
+      script = string(R"(osascript 2> /dev/null << 'EOF'
+set output to ""
+set targetFile to ")") + string(fname) + string(R"("
+set targetFolder to (POSIX file ")") + location + string(R"(") as alias
+set aFile to choose file name with prompt ")") + string(title) + string(R"(" default name targetFile default location targetFolder
+set output to (POSIX path of aFile) & linefeed
+return output
+EOF
+)"); 
+    }
+    theSaveResult = osascript(false, script);
+    return theSaveResult.c_str();
+  }
+  ws = "Cocoa";
+
+  if (@available(macOS 11.0, *)) {
+    cancel_pressed = false;
+  
+    NSSavePanel *sFilePanel = [NSSavePanel savePanel];
+    [sFilePanel setMessage:[NSString stringWithUTF8String:title]];
+    [sFilePanel setDirectoryURL:[NSURL fileURLWithPath:[NSString stringWithUTF8String:dir]]];
+    [sFilePanel setNameFieldStringValue:[[[NSString stringWithUTF8String:fname] lastPathComponent] stringByDeletingPathExtension]];
+    [sFilePanel setCanCreateDirectories:YES];
+  
+    NSView *saveView = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 433, 21)];
+    NSPopUpButton *savePop = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(105, 0, 255, 22)];
+    NSString *saveFilter = [NSString stringWithUTF8String:filter];
+    bool saveShowAccessory = true;
+    bool saveAllowAllFiles = false;
+  
+    if ([saveFilter length] == 0 ||
+      ([saveFilter rangeOfString:@"|"].location != NSNotFound &&
+      [saveFilter rangeOfString:@"|"].location == 0))
+      saveShowAccessory = false;
+  
+    if ([saveFilter length] == 0 ||
+      [saveFilter rangeOfString:@"|"].location == NSNotFound) {
+      saveFilter = [saveFilter stringByAppendingString:@"|"];
+      saveAllowAllFiles = true;
+    }
+  
+    int saveIndex = 0;
+    int saveCount = 0, saveLength = [saveFilter length];
+    NSRange saveRange = NSMakeRange(0, saveLength);
+  
+    while (saveRange.location != NSNotFound) {
+      saveRange = [saveFilter rangeOfString: @"|" options:0 range:saveRange];
+  
+      if (saveRange.location != NSNotFound) {
+        saveRange = NSMakeRange(saveRange.location + saveRange.length, saveLength - (saveRange.location + saveRange.length));
+        saveCount += 1;
+      }
+    }
+  
+    NSString *savePattern = saveFilter;
+    savePattern = [savePattern stringByReplacingOccurrencesOfString:@"*." withString:@""];
+    savePattern = [savePattern stringByReplacingOccurrencesOfString:@" " withString:@""];
+  
+    NSArray *saveArray1 = [saveFilter componentsSeparatedByString:@"|"];
+    NSArray *saveArray2 = [savePattern componentsSeparatedByString:@"|"];
+    NSMutableArray *savePatternArray = [[NSMutableArray alloc] init];
+    NSMutableArray *saveDescrArray = [[NSMutableArray alloc] init];
+  
+    for (saveIndex = 0; saveIndex <= saveCount; saveIndex += 1) {
+      if (saveIndex % 2) {
+        [savePatternArray addObject:[saveArray2 objectAtIndex:saveIndex]];
+      } else {
+        [saveDescrArray addObject:[saveArray1 objectAtIndex:saveIndex]];
+      }
+    }
+  
+    selectedSavePattern = [savePatternArray objectAtIndex:0];
+    savePatternItems = [selectedSavePattern componentsSeparatedByString:@";"];
+  
+    NSMutableArray<UTType *> *contentTypes = [[NSMutableArray alloc] init];
+  
+    for (std::size_t i = 0; i < [savePatternItems count]; i++) {
+      NSString *ext = [savePatternItems objectAtIndex:i];
+      if (UTType *type = [UTType typeWithFilenameExtension:ext]) {
+        [contentTypes addObject:type];
+      }
+    }
+            
+    [sFilePanel setAllowedContentTypes:contentTypes];
+    [contentTypes release];
+  
+    if ([savePatternItems containsObject:@"*"] || saveAllowAllFiles || !saveShowAccessory) {
+      [sFilePanel setAllowedContentTypes:@[]];
+    }
+  
+    [savePop addItemsWithTitles:saveDescrArray];
+    [savePop selectItemWithTitle:[saveDescrArray objectAtIndex:0]];
+    [saveView addSubview:savePop];
+    [sFilePanel setAccessoryView:saveView];
+  
+    if (!saveShowAccessory)
+      [sFilePanel setAccessoryView:nullptr];
+  
+    savePopIndex = 0;
+  
+    [sFilePanel beginSheetModalForWindow:(NSWindow *)owner completionHandler:^(NSInteger result) {
+      
+      if (result == NSModalResponseOK) {
+        NSURL *theSaveURL = [sFilePanel URL];
+        NSString *theSaveFile = [theSaveURL path];
+        theSaveResult = [theSaveFile UTF8String];
+      } else if (result == NSModalResponseCancel)
+        theSaveResult.clear();
+      
+    }];
+  
+    NSModalSession saveSession = [NSApp beginModalSessionForWindow:sFilePanel];
+      
+    for (;;) {
+  
+      if ([NSApp runModalSession:saveSession] != NSModalResponseContinue)
+        break;
+      
+      if (saveShowAccessory) {
+        if ([savePop indexOfSelectedItem] != savePopIndex) {
+          selectedSavePattern = [savePatternArray objectAtIndex:[savePop indexOfSelectedItem]];
+          savePatternItems = [selectedSavePattern componentsSeparatedByString:@";"];
+  
+          if ([savePatternItems containsObject:@"*"]) {
+            [sFilePanel setAllowedContentTypes:@[]];
+          } else {
+            NSMutableArray<UTType *> *contentTypes = [[NSMutableArray alloc] init];
+  
+            for (std::size_t i = 0; i < [savePatternItems count]; i++) {
+              NSString *ext = [savePatternItems objectAtIndex:i];
+              if (UTType *type = [UTType typeWithFilenameExtension:ext]) {
+                [contentTypes addObject:type];
+              }
+            }
+                  
+            [sFilePanel setAllowedContentTypes:contentTypes];
+            [contentTypes release];
+          }
+  
+          savePopIndex = [savePop indexOfSelectedItem];
+        }
+      }
+  
+    }
+  
+    [NSApp endModalSession:saveSession];
+  
+    [sFilePanel close];
+  
+    [savePatternArray release];
+    [saveDescrArray release];
+    [savePop release];
+    [saveView release];
+  
+  } else {
+  
+    NSSavePanel *sFilePanel = [NSSavePanel savePanel];
+    [sFilePanel setMessage:[NSString stringWithUTF8String:title]];
+    [sFilePanel setDirectoryURL:[NSURL fileURLWithPath:[NSString stringWithUTF8String:dir]]];
+    [sFilePanel setNameFieldStringValue:[[[NSString stringWithUTF8String:fname] lastPathComponent] stringByDeletingPathExtension]];
+    [sFilePanel setCanCreateDirectories:YES];
+  
+    NSView *saveView = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 433, 21)];
+    NSPopUpButton *savePop = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(105, 0, 255, 22)];
+    NSString *saveFilter = [NSString stringWithUTF8String:filter];
+    bool saveShowAccessory = true;
+    bool saveAllowAllFiles = false;
+  
+    if ([saveFilter length] == 0 ||
+      ([saveFilter rangeOfString:@"|"].location != NSNotFound &&
+       [saveFilter rangeOfString:@"|"].location == 0))
+      saveShowAccessory = false;
+  
+    if ([saveFilter length] == 0 ||
+      [saveFilter rangeOfString:@"|"].location == NSNotFound) {
+      saveFilter = [saveFilter stringByAppendingString:@"|"];
+      saveAllowAllFiles = true;
+    }
+  
+    int saveIndex = 0;
+    int saveCount = 0, saveLength = [saveFilter length];
+    NSRange saveRange = NSMakeRange(0, saveLength);
+  
+    while (saveRange.location != NSNotFound) {
+      saveRange = [saveFilter rangeOfString: @"|" options:0 range:saveRange];
+  
+      if (saveRange.location != NSNotFound) {
+        saveRange = NSMakeRange(saveRange.location + saveRange.length, saveLength - (saveRange.location + saveRange.length));
+        saveCount += 1;
+      }
+    }
+  
+    NSString *savePattern = saveFilter;
+    savePattern = [savePattern stringByReplacingOccurrencesOfString:@"*." withString:@""];
+    savePattern = [savePattern stringByReplacingOccurrencesOfString:@" " withString:@""];
+  
+    NSArray *saveArray1 = [saveFilter componentsSeparatedByString:@"|"];
+    NSArray *saveArray2 = [savePattern componentsSeparatedByString:@"|"];
+    NSMutableArray *savePatternArray = [[NSMutableArray alloc] init];
+    NSMutableArray *saveDescrArray = [[NSMutableArray alloc] init];
+  
+    for (saveIndex = 0; saveIndex <= saveCount; saveIndex += 1) {
+      if (saveIndex % 2) {
+        [savePatternArray addObject:[saveArray2 objectAtIndex:saveIndex]];
+      } else {
+        [saveDescrArray addObject:[saveArray1 objectAtIndex:saveIndex]];
+      }
+    }
+  
+    selectedSavePattern = [savePatternArray objectAtIndex:0];
+    savePatternItems = [selectedSavePattern componentsSeparatedByString:@";"];
+    #pragma GCC diagnostic push
+    #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+    #pragma clang diagnostic push
+    #pragma clang diagnostic ignored "-Wdeprecated-declarations"
+    [sFilePanel setAllowedFileTypes:savePatternItems];
+    #pragma clang diagnostic pop
+    #pragma GCC diagnostic pop
+  
+    if ([savePatternItems containsObject:@"*"] || saveAllowAllFiles || !saveShowAccessory)
+      #pragma GCC diagnostic push
+      #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+      #pragma clang diagnostic push
+      #pragma clang diagnostic ignored "-Wdeprecated-declarations"
+      [sFilePanel setAllowedFileTypes:nullptr];
+      #pragma clang diagnostic pop
+      #pragma GCC diagnostic pop
+  
+    [savePop addItemsWithTitles:saveDescrArray];
+    [savePop selectItemWithTitle:[saveDescrArray objectAtIndex:0]];
+    [saveView addSubview:savePop];
+    [sFilePanel setAccessoryView:saveView];
+  
+    if (!saveShowAccessory)
+      [sFilePanel setAccessoryView:nullptr];
+  
+    savePopIndex = 0;
+  
+    [sFilePanel beginSheetModalForWindow:(NSWindow *)owner completionHandler:^(NSInteger result) {
+        
+      if (result == NSModalResponseOK) {
+        NSURL *theSaveURL = [sFilePanel URL];
+        NSString *theSaveFile = [theSaveURL path];
+        theSaveResult = [theSaveFile UTF8String];
+      } else if (result == NSModalResponseCancel)
+        theSaveResult.clear();
+        
+    }];
+  
+    NSModalSession saveSession = [NSApp beginModalSessionForWindow:sFilePanel];
+  
+    for (;;) {
+  
+      if ([NSApp runModalSession:saveSession] != NSModalResponseContinue)
+        break;
+  
+      if (saveShowAccessory) {
+        if ([savePop indexOfSelectedItem] != savePopIndex) {
+          selectedSavePattern = [savePatternArray objectAtIndex:[savePop indexOfSelectedItem]];
+          savePatternItems = [selectedSavePattern componentsSeparatedByString:@";"];
+  
+          if ([savePatternItems containsObject:@"*"])
+            #pragma GCC diagnostic push
+            #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+            #pragma clang diagnostic push
+            #pragma clang diagnostic ignored "-Wdeprecated-declarations"
+            [sFilePanel setAllowedFileTypes:nullptr];
+            #pragma clang diagnostic pop
+            #pragma GCC diagnostic pop
+          else
+            #pragma GCC diagnostic push
+            #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+            #pragma clang diagnostic push
+            #pragma clang diagnostic ignored "-Wdeprecated-declarations"
+            [sFilePanel setAllowedFileTypes:savePatternItems];
+            #pragma clang diagnostic pop
+            #pragma GCC diagnostic pop
+  
+          savePopIndex = [savePop indexOfSelectedItem];
+        }
+      }
+    }
+  
+    [NSApp endModalSession:saveSession];
+  
+    [sFilePanel close];
+  
+    [savePatternArray release];
+    [saveDescrArray release];
+    [savePop release];
+    [saveView release];
+    
+  }
+  return theSaveResult.c_str();
+}
+
+std::string theFolderResult;
+const char *cocoa_get_directory(const char *capt, const char *root) {
+  cancel_pressed = false;
+
+  if (!strcmp(ws.c_str(), "OSAScript") || !owner || ![NSThread isMainThread]) {
+    ws = "OSAScript";
+    static string script;
+    theFolderResult.clear();
+    const char *home = getenv("HOME");
+    string location = ((!string(root).empty()) ? root : ((home) ? home : "/"));
+    if ([NSThread isMainThread] && [[NSApp windows] count] > 0) {
+      script = string(R"(set output to ""
+set targetFolder to (POSIX file ")") + location + string(R"(") as alias
+set aFile to choose folder with prompt ")") + string(capt) + string(R"(" default location targetFolder
+set output to (POSIX path of aFile) & linefeed
+return output
+)");
+    } else {
+      script = string(R"(osascript 2> /dev/null << 'EOF'
+set output to ""
+set targetFolder to (POSIX file ")") + location + string(R"(") as alias
+set aFile to choose folder with prompt ")") + string(capt) + string(R"(" default location targetFolder
+set output to (POSIX path of aFile) & linefeed
+return output
+EOF
+)");
+    }
+    theFolderResult = osascript(false, script);
+    return theFolderResult.c_str();
+  }
+  ws = "Cocoa";
+
+  NSOpenPanel *dirPanel = [NSOpenPanel openPanel];
+  [dirPanel setMessage:[NSString stringWithUTF8String:capt]];
+  [dirPanel setDirectoryURL:[NSURL fileURLWithPath:[NSString stringWithUTF8String:root]]];
+  [dirPanel setCanChooseFiles:NO];
+  [dirPanel setCanChooseDirectories:YES];
+  [dirPanel setCanCreateDirectories:YES];
+  [dirPanel setAllowsMultipleSelection:NO];
+  [dirPanel setResolvesAliases:YES];
+
+  [dirPanel beginSheetModalForWindow:(NSWindow *)owner completionHandler:^(NSInteger result) {
+
+    if (result == NSModalResponseOK) {
+      NSURL *theFolderURL = [[dirPanel URLs] objectAtIndex:0];
+      NSString *theFolderPath = [[theFolderURL path] stringByAppendingString:@"/"];
+      theFolderPath = [theFolderPath stringByReplacingOccurrencesOfString:@"//" withString:@"/"];
+      theFolderResult = [theFolderPath UTF8String];
+      [NSApp stopModal];
+    } else if (result == NSModalResponseCancel) {
+      theFolderResult.clear();
+      [NSApp stopModal];
+    }
+
+  }];
+    
+  [NSApp runModalForWindow:dirPanel];
+
+  [dirPanel close];
+
+  return theFolderResult.c_str();
+}
+
+int rescol;
+bool colorOKPressed;
+int cocoa_get_color(int defcol, const char *title) {
+  cancel_pressed = false;
+  
+  rescol = -1;
+  int redValue = defcol & 0xFF;
+  int greenValue = (defcol >> 8) & 0xFF;
+  int blueValue = (defcol >> 16) & 0xFF;
+
+  if (!strcmp(ws.c_str(), "OSAScript") || !owner || ![NSThread isMainThread]) {
+    ws = "OSAScript";
+    int newRedValue = (int)((redValue / 255) * 65535);
+    int newGreenValue = (int)((greenValue / 255) * 65535);
+    int newBlueValue = (int)((blueValue / 255) * 65535);
+    static string strcol;
+    if ([NSThread isMainThread] && [[NSApp windows] count] > 0) {
+      strcol = osascript(false, string(R"(set standardColor to choose color )") + 
+string("default color {") + std::to_string(newRedValue) + string(", ") + std::to_string(newGreenValue) + string(", ") + std::to_string(newBlueValue) + string(R"(}
+set r16 to item 1 of standardColor
+set g16 to item 2 of standardColor
+set b16 to item 3 of standardColor
+set r8 to round (r16 / 65535 * 255)
+set g8 to round (g16 / 65535 * 255)
+set b8 to round (b16 / 65535 * 255)
+set rgbResult to "" & r8 & "," & g8 & "," & b8
+return rgbResult
+)"));
+    } else {
+      strcol = osascript(false, string(R"(osascript 2> /dev/null << 'EOF'
+set standardColor to choose color )") + string("default color {") + std::to_string(newRedValue) + string(", ") + std::to_string(newGreenValue) + string(", ") + std::to_string(newBlueValue) + string(R"(}
+set r16 to item 1 of standardColor
+set g16 to item 2 of standardColor
+set b16 to item 3 of standardColor
+set r8 to round (r16 / 65535 * 255)
+set g8 to round (g16 / 65535 * 255)
+set b8 to round (b16 / 65535 * 255)
+set rgbResult to "" & r8 & "," & g8 & "," & b8
+return rgbResult
+EOF
+)"));
+    }
+    if (!strcol.empty()) {
+      int r = 0, g = 0, b = 0;
+      std::vector<string> stringVec = string_split(strcol, ',');
+      unsigned int index = 0;
+      for (const string &str : stringVec) {
+        if (index == 0) r = strtod(str.c_str(), nullptr);
+        if (index == 1) g = strtod(str.c_str(), nullptr);
+        if (index == 2) b = strtod(str.c_str(), nullptr);
+        index += 1;
+      }
+      return (int)(r | (g << 8) | (b << 16));
+    }
+    return rescol;
+  }
+  ws = "Cocoa";
+
+  NSInteger buttonWidth = 82, buttonHeight = 30, rightofButtons = 8;
+  NSString *myColorTitle = [NSString stringWithUTF8String:title];
+  NSColor *myDefCol = [NSColor colorWithCalibratedRed:redValue green:greenValue blue:blueValue alpha:1.0f];
+  NSColorPanel *myColorPanel = [NSColorPanel sharedColorPanel];
+
+  [myColorPanel setFrame:NSMakeRect(0, 0, 229, 399) display:YES animate:NO];
+  [myColorPanel setShowsAlpha:NO];
+  if ([myColorTitle length] > 0) [myColorPanel setTitle:myColorTitle];
+  NSSize myColorSize = [[myColorPanel contentView] frame].size;
+  NSView *myViewView = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, myColorSize.width, buttonHeight)];
+  NSView *myButtonView = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, myColorSize.width, buttonHeight)];
+  NSButton *myOKButton = [[NSButton alloc] initWithFrame:NSMakeRect(myColorSize.width - buttonWidth - rightofButtons, 0, buttonWidth, buttonHeight)];
+  NSButton *myCancelButton = [[NSButton alloc] initWithFrame:NSMakeRect(myColorSize.width - (buttonWidth * 2) - rightofButtons, 0, buttonWidth, buttonHeight)];
+
+  [myOKButton setTitle:[NSString stringWithUTF8String:cocoa_widget_get_button_name(BUTTON_OK)]];
+  [myOKButton setAlternateTitle:[NSString stringWithUTF8String:cocoa_widget_get_button_name(BUTTON_OK)]];
+  [myOKButton setBezelStyle:(NSBezelStyle)1];
+  [myCancelButton setTitle:[NSString stringWithUTF8String:cocoa_widget_get_button_name(BUTTON_CANCEL)]];
+  [myCancelButton setAlternateTitle:[NSString stringWithUTF8String:cocoa_widget_get_button_name(BUTTON_CANCEL)]];
+  [myCancelButton setBezelStyle:(NSBezelStyle)1];
+  [myButtonView addSubview:myOKButton];
+  [myButtonView addSubview:myCancelButton];
+  [myOKButton setKeyEquivalent:@"\r"];
+  [myOKButton setNeedsDisplay:YES];
+  [myViewView addSubview:myButtonView];
+  [myColorPanel setColor:myDefCol];
+  NSView *oldView = [myColorPanel contentView];
+  [oldView retain];
+  [myColorPanel setContentView:0];
+  NSView *colorView = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, myColorSize.width, myColorSize.height)];
+  NSView *parentView = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, myColorSize.width, myColorSize.height)];
+  [colorView addSubview:oldView];
+  [parentView addSubview:colorView];
+  [parentView addSubview:myViewView];
+  [myColorPanel setContentView:parentView];
+  [[myColorPanel standardWindowButton:NSWindowCloseButton] setHidden:YES];
+  [[myColorPanel standardWindowButton:NSWindowMiniaturizeButton] setHidden:YES];
+  [[myColorPanel standardWindowButton:NSWindowZoomButton] setHidden:YES];
+  myColorPanel.styleMask &= ~NSWindowStyleMaskResizable;
+  colorView.autoresizingMask =  NSViewMinYMargin;
+  parentView.autoresizingMask = NSViewMaxYMargin;
+  myViewView.autoresizingMask = NSViewWidthSizable | NSViewMinXMargin;
+  myButtonView.autoresizingMask = NSViewMinXMargin;
+
+  [myColorPanel setFrame:NSMakeRect(0, 0, 229, 399 + buttonHeight) display:YES animate:NO];
+  [myColorPanel center];
+
+  CGFloat r, g, b, a;
+  NSColor *myColor = myDefCol;
+  int redIntValue, greenIntValue, blueIntValue;
+  NSString *redHexValue, *greenHexValue, *blueHexValue;
+  NSColor *convertedColor;
+
+  rescol = -1;
+  colorOKPressed = false;
+
+  [(NSWindow *)owner beginSheet:myColorPanel completionHandler:^(NSInteger result) {
+
+  }];
+
+  NSModalSession colorSession = [NSApp beginModalSessionForWindow:myColorPanel];
+
+  for (;;) {
+
+    if ([NSApp runModalSession:colorSession] != NSModalResponseContinue) {
+      break;
+    }
+
+    if ([[myColorPanel standardWindowButton:NSWindowCloseButton] state] == NSControlStateValueOn)
+      [[myColorPanel standardWindowButton:NSWindowCloseButton] setState:NSControlStateValueOff];
+
+    if ([myOKButton state] == NSControlStateValueOn) {
+      colorOKPressed = true;
+      break;
+    }
+
+    if ([myCancelButton state] == NSControlStateValueOn) {
+      break;
+    }
+
+  }
+
+  [NSApp endModalSession:colorSession];
+    
+  if (colorOKPressed) {
+    myColor = [myColorPanel color];
+    convertedColor = [myColor colorUsingType:NSColorTypeComponentBased];
+
+    if (convertedColor) {
+      [convertedColor getRed:&r green:&g blue:&b alpha:&a];
+      redIntValue = (int)(r * 255);
+      greenIntValue = (int)(g * 255);
+      blueIntValue = (int)(b * 255);
+
+      rescol = (redIntValue & 0xFF) + ((greenIntValue & 0xFF) << 8) + ((blueIntValue & 0xFF) << 16);
+    }
+  }
+
+  [myColorPanel setContentView:oldView];
+  
+  [myColorPanel close];
+
+  [oldView release];
+  [colorView release];
+  [myOKButton release];
+  [myCancelButton release];
+  [myButtonView release];
+  [myViewView release];
+  [parentView release];
+
+  return rescol;
+}
+
+namespace dialog_module {
+  
+  namespace {
+
+    string caption;
+    string current_icon;
+
+    int const btn_array_len = 7;
+    string btn_array[btn_array_len] = { "Abort", "Ignore", "OK", "Cancel", "Yes", "No", "Retry" };
+    
+    string remove_trailing_zeros(double numb) {
+      string strnumb = std::to_string(numb);
+      while (!strnumb.empty() && strnumb.find('.') != string::npos && (strnumb.back() == '.' || strnumb.back() == '0'))
+      strnumb.pop_back();
+      return strnumb;
+    }
+
+    bool file_exists(string fname) {
+      struct stat sb;
+      return (stat(fname.c_str(), &sb) == 0 &&
+        S_ISREG(sb.st_mode) != 0);
+    }
+
+    string filename_absolute(string fname) {
+      char result[PATH_MAX];
+      if (realpath(fname.c_str(), result)) {
+        if (file_exists(result)) {
+          return result;
+        }
+      }
+      return "";
+    }
+    
+  } // anonymous namespace
+  
+  int show_message(const char *str) {
+    string str_str = str;
+    return cocoa_show_message(str_str.c_str(), false, current_icon.c_str(), (caption.empty()) ? cpt_array[CAPTION_INFORMATION].c_str() : caption.c_str());
+  }
+  
+  int show_message_cancelable(const char *str) {
+    string str_str = str;
+    return cocoa_show_message(str_str.c_str(), true, current_icon.c_str(), (caption.empty()) ? cpt_array[CAPTION_QUESTION].c_str() : caption.c_str());
+  }
+  
+  int show_question(const char *str) {
+    string str_str = str;
+    return cocoa_show_question(str_str.c_str(), false, current_icon.c_str(), (caption.empty()) ? cpt_array[CAPTION_QUESTION].c_str() : caption.c_str());
+  }
+  
+  int show_question_cancelable(const char *str) {
+    string str_str = str;
+    return cocoa_show_question(str_str.c_str(), true, current_icon.c_str(), (caption.empty()) ? cpt_array[CAPTION_QUESTION].c_str() : caption.c_str());
+  }
+  
+  int show_attempt(const char *str) {
+    string str_str = str;
+    return cocoa_show_attempt(str_str.c_str(), current_icon.c_str(), (caption.empty()) ? cpt_array[CAPTION_ERROR].c_str() : caption.c_str());
+  }
+  
+  int show_error(const char *str, bool abort) {
+    string str_str = str;
+    int result = cocoa_show_error(str_str.c_str(), abort, current_icon.c_str(), (caption.empty()) ? cpt_array[CAPTION_ERROR].c_str() : caption.c_str());
+    return result;
+  }
+  
+  const char *get_string(const char *str, const char *def) {
+    string str_str = str;
+    string str_def = def;
+    return cocoa_input_box(str_str.c_str(), str_def.c_str(), current_icon.c_str(), (caption.empty()) ? cpt_array[CAPTION_INPUT].c_str() : caption.c_str(), false);
+  }
+  
+  const char *get_password(const char *str, const char *def) {
+    string str_str = str;
+    string str_def = def;
+    return cocoa_password_box(str_str.c_str(), str_def.c_str(), current_icon.c_str(), (caption.empty()) ? cpt_array[CAPTION_INPUT].c_str() : caption.c_str(), false);
+  }
+  
+  double get_integer(const char *str, double def) {
+    double DIGITS_MIN = -999999999999999;
+    double DIGITS_MAX = 999999999999999;
+
+    if (def < DIGITS_MIN) def = DIGITS_MIN;
+    if (def > DIGITS_MAX) def = DIGITS_MAX;
+
+    string str_str = str;
+    string str_def = remove_trailing_zeros(def);
+    string str_result = cocoa_input_box(str_str.c_str(), str_def.c_str(), current_icon.c_str(), (caption.empty()) ? cpt_array[CAPTION_INPUT].c_str() : caption.c_str(), true);    
+  
+    for (int i = 0; !str_result.empty() && i < str_result.length() && (!std::isdigit(str_result[i]) && str_result[i] != '-' && str_result[i] != '+' && str_result[i] != '.'); i++) {
+      str_result = str_result.substr(i + 1);  
+    }
+  
+    if (str_result.empty()) cancel_pressed = true; else cancel_pressed = false;
+    double result = strtod(str_result.c_str(), nullptr);
+
+    if (result < DIGITS_MIN) result = DIGITS_MIN;
+    if (result > DIGITS_MAX) result = DIGITS_MAX;
+
+    return result;
+  }
+  
+  double get_passcode(const char *str, double def) {
+    double DIGITS_MIN = -999999999999999;
+    double DIGITS_MAX = 999999999999999;
+
+    if (def < DIGITS_MIN) def = DIGITS_MIN;
+    if (def > DIGITS_MAX) def = DIGITS_MAX;
+
+    string str_str = str;
+    string str_def = remove_trailing_zeros(def);
+    string str_result = cocoa_password_box(str_str.c_str(), str_def.c_str(), current_icon.c_str(), (caption.empty()) ? cpt_array[CAPTION_INPUT].c_str() : caption.c_str(), true);    
+  
+    for (int i = 0; !str_result.empty() && i < str_result.length() && (!std::isdigit(str_result[i]) && str_result[i] != '-' && str_result[i] != '+' && str_result[i] != '.'); i++) {
+      str_result = str_result.substr(i + 1);  
+    }
+  
+    if (str_result.empty()) cancel_pressed = true; else cancel_pressed = false;
+    double result = strtod(str_result.c_str(), nullptr);
+
+    if (result < DIGITS_MIN) result = DIGITS_MIN;
+    if (result > DIGITS_MAX) result = DIGITS_MAX;
+
+    return result;
+  }
+  
+  const char *get_open_filename(const char *filter, const char *fname) {
+    string str_filter = filter; string str_fname = fname; static string result;
+    result = cocoa_get_open_filename(str_filter.c_str(), str_fname.c_str(), "", "", false);
+    return result.c_str();
+  }
+  
+  const char *get_open_filename_ext(const char *filter, const char *fname, const char *dir, const char *title) {
+    string str_filter = filter; string str_fname = fname;
+    string str_dir = dir; string str_title = title; static string result;
+    result = cocoa_get_open_filename(str_filter.c_str(), str_fname.c_str(), str_dir.c_str(), str_title.c_str(), false);
+    return result.c_str();
+  }
+  
+  const char *get_open_filenames(const char *filter, const char *fname) {
+    string str_filter = filter; string str_fname = fname; static string result;
+    result = cocoa_get_open_filename(str_filter.c_str(), str_fname.c_str(), "", "", true);
+    return result.c_str();
+  }
+  
+  const char *get_open_filenames_ext(const char *filter, const char *fname, const char *dir, const char *title) {
+    string str_filter = filter; string str_fname = fname;
+    string str_dir = dir; string str_title = title; static string result;
+    result = cocoa_get_open_filename(str_filter.c_str(), str_fname.c_str(), str_dir.c_str(), str_title.c_str(), true);
+    return result.c_str();
+  }
+  
+  const char *get_save_filename(const char *filter, const char *fname) {
+    string str_filter = filter; string str_fname = fname; static string result;
+    result = cocoa_get_save_filename(str_filter.c_str(), str_fname.c_str(), "", "");
+    return result.c_str();
+  }
+  
+  const char *get_save_filename_ext(const char *filter, const char *fname, const char *dir, const char *title) {
+    string str_filter = filter; string str_fname = fname;
+    string str_dir = dir; string str_title = title; static string result;
+    result = cocoa_get_save_filename(str_filter.c_str(), str_fname.c_str(), str_dir.c_str(), str_title.c_str());
+    return result.c_str();
+  }
+  
+  const char *get_directory(const char *dname) {
+    string str_dname = dname;  static string result;
+    result = cocoa_get_directory("", str_dname.c_str());
+    return result.c_str();
+  }
+  
+  const char *get_directory_alt(const char *capt, const char *root) {
+    string str_dname = root; string str_title = capt; static string result;
+    result = cocoa_get_directory(str_title.c_str(), str_dname.c_str());
+    return result.c_str();
+  }
+  
+  int get_color(int defcol) {
+    return cocoa_get_color(defcol, "");
+  }
+  
+  int get_color_ext(int defcol, const char *title) {
+    string str_title = title;
+    return cocoa_get_color(defcol, str_title.c_str());
+  }
+  
+  const char *widget_get_caption() {
+    return caption.c_str();
+  }
+  
+  void widget_set_caption(const char *str) {
+    caption = str;
+  }
+  
+  const char *widget_get_owner() {
+    return cocoa_widget_get_owner();
+  }
+  
+  void widget_set_owner(const char *hwnd) {
+    cocoa_widget_set_owner(hwnd);
+  }
+
+  const char *widget_get_icon() {
+    return current_icon.c_str();
+  }
+
+  void widget_set_icon(const char *icon) {
+    current_icon = filename_absolute(icon);
+  }
+  
+  const char *widget_get_system() {
+    return ws.c_str();
+  }
+  
+  void widget_set_system(const char *sys) {
+    if (!strcmp(sys, "OSAScript")) {
+      ws = "OSAScript";
+    } else if (!strcmp(sys, "Cocoa")) {
+      ws = "Cocoa";
+    }
+  }
+
+  void widget_set_button_name(int type, const char *name) {
+    string str_name = name;
+    btn_array[type] = str_name;
+  }
+
+  const char *widget_get_button_name(int type) {
+    return btn_array[type].c_str();
+  }
+
+  bool widget_get_canceled() {
+    return cancel_pressed;
+  }
+
+  void widget_set_locale() {
+    widget_set_locale_helper();
+  }
+
+} // namespace dialog_module

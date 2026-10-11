@@ -1,0 +1,2711 @@
+/*
+
+MIT License
+
+Copyright © 2021-2026 Samuel Venable
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+*/
+
+#include <apiprocess/process.hpp>
+#if defined(__apiprocess_supported__)
+#if (defined(__sun) && defined(__SVR4))
+#if !defined(_KMEMUSER)
+#define _KMEMUSER
+#endif
+#endif
+#include <unordered_map>
+#include <algorithm>
+#include <fstream>
+#include <sstream>
+#include <thread>
+#include <chrono>
+#include <mutex>
+#include <cstdlib>
+#include <cstddef>
+#include <cstring>
+#include <climits>
+#include <cstdio>
+#include <cerrno>
+#include <ctime>
+#if (!defined(_WIN32) && !defined(_WIN64))
+#include <signal.h>
+#include <unistd.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <fcntl.h>
+#endif
+#if (defined(_WIN32) || defined(_WIN64))
+#include <windef.h>
+#include <shlwapi.h>
+#include <objbase.h>
+#include <tlhelp32.h>
+#include <winternl.h>
+#include <processthreadsapi.h>
+#include <fileapi.h>
+#include <psapi.h>
+#include <io.h>
+#elif (defined(__APPLE__) && defined(__MACH__))
+#include <sys/proc_info.h>
+#include <mach-o/dyld.h>
+#include <sys/sysctl.h>
+#include <libproc.h>
+#elif (defined(__linux__) || defined(__ANDROID__))
+#include <dirent.h>
+#if defined(__has_include)
+#if __has_include(<linux/sched.h>)
+#include <linux/sched.h>
+#endif
+#endif
+#elif ((defined(__FreeBSD__) || defined(__FreeBSD_kernel__)) || defined(__DragonFly__) || defined(__OpenBSD__))
+#include <sys/param.h>
+#include <sys/sysctl.h>
+#include <sys/user.h>
+#include <kvm.h>
+#if ((defined(__FreeBSD__) || defined(__FreeBSD_kernel__)) || defined(__OpenBSD__))
+#include <sys/proc.h>
+#endif
+#elif defined(__NetBSD__)
+#include <sys/param.h>
+#include <sys/sysctl.h>
+#include <kvm.h>
+#elif (defined(__sun) && defined(__SVR4))
+#include <kvm.h>
+#include <dirent.h>
+#include <libproc.h>
+#include <sys/time.h>
+#include <sys/proc.h>
+#include <sys/user.h>
+#include <sys/param.h>
+#include <sys/procfs.h>
+#endif
+#include <sys/stat.h>
+#if (defined(USE_SDL_POLLEVENT) || defined(USE_SDL2_POLLEVENT))
+#include <SDL.h>
+#endif
+#if defined(USE_SDL3_POLLEVENT)
+#include <SDL3/SDL.h>
+#endif
+#if ((defined(_WIN32) || defined(_WIN64)) && defined(_MSC_VER))
+#pragma comment(lib, "ntdll.lib")
+#endif
+#if (defined(__linux__) || defined(__ANDROID__))
+#if !defined(PF_KTHREAD)
+#define PF_KTHREAD 0x00200000
+#endif
+#endif
+
+namespace {
+
+  void message_pump() {
+    #if (defined(_WIN32) || defined(_WIN64))
+    MSG msg;
+    while (PeekMessage(&msg, nullptr, 0, 0, PM_REMOVE)) {
+      TranslateMessage(&msg);
+      DispatchMessage(&msg);
+    }
+    #endif
+  }
+
+  std::vector<std::string> string_split_by_first_equals_sign(std::string str) {
+    std::size_t pos = 0;
+    std::vector<std::string> vec;
+    if ((pos = str.find('=')) != std::string::npos) {
+      vec.push_back(str.substr(0, pos));
+      vec.push_back(str.substr(pos + 1));
+    }
+    return vec;
+  }
+
+  #if (defined(_WIN32) || defined(_WIN64))
+  enum MEMTYP {
+    MEMCMD,
+    MEMENV,
+    MEMCWD
+  };
+
+  #if !defined(_MSC_VER)
+  #pragma pack(push, 8)
+  #else
+  #include <pshpack8.h>
+  #endif
+
+  /* CURDIR struct from:
+   https://github.com/processhacker/phnt/
+   CC BY 4.0 licence */
+
+  typedef struct {
+    UNICODE_STRING DosPath;
+    HANDLE Handle;
+  } CURDIR;
+
+  /* RTL_DRIVE_LETTER_CURDIR struct from:
+   https://github.com/processhacker/phnt/
+   CC BY 4.0 licence */
+
+  typedef struct {
+    USHORT Flags;
+    USHORT Length;
+    ULONG TimeStamp;
+    STRING DosPath;
+  } RTL_DRIVE_LETTER_CURDIR;
+
+  /* RTL_USER_PROCESS_PARAMETERS struct from:
+   https://github.com/processhacker/phnt/
+   CC BY 4.0 licence */
+
+  typedef struct {
+    ULONG MaximumLength;
+    ULONG Length;
+    ULONG Flags;
+    ULONG DebugFlags;
+    HANDLE ConsoleHandle;
+    ULONG ConsoleFlags;
+    HANDLE StandardInput;
+    HANDLE StandardOutput;
+    HANDLE StandardError;
+    CURDIR CurrentDirectory;
+    UNICODE_STRING DllPath;
+    UNICODE_STRING ImagePathName;
+    UNICODE_STRING CommandLine;
+    PVOID Environment;
+    ULONG StartingX;
+    ULONG StartingY;
+    ULONG CountX;
+    ULONG CountY;
+    ULONG CountCharsX;
+    ULONG CountCharsY;
+    ULONG FillAttribute;
+    ULONG WindowFlags;
+    ULONG ShowWindowFlags;
+    UNICODE_STRING WindowTitle;
+    UNICODE_STRING DesktopInfo;
+    UNICODE_STRING ShellInfo;
+    UNICODE_STRING RuntimeData;
+    RTL_DRIVE_LETTER_CURDIR CurrentDirectories[32];
+    ULONG_PTR EnvironmentSize;
+    ULONG_PTR EnvironmentVersion;
+    PVOID PackageDependencyData;
+    ULONG ProcessGroupId;
+    ULONG LoaderThreads;
+    UNICODE_STRING RedirectionDllName;
+    UNICODE_STRING HeapPartitionName;
+    ULONG_PTR DefaultThreadpoolCpuSetMasks;
+    ULONG DefaultThreadpoolCpuSetMaskCount;
+  } RTL_USER_PROCESS_PARAMETERS;
+
+  #if !defined(_MSC_VER)
+  #pragma pack(pop)
+  #else
+  #include <poppack.h>
+  #endif
+
+  std::wstring widen(std::string str) {
+    if (str.empty()) return L"";
+    std::size_t wchar_count = str.size() + 1;
+    std::vector<wchar_t> buf(wchar_count);
+    wchar_count = (std::size_t)MultiByteToWideChar(CP_UTF8, 0, str.c_str(), -1, buf.data(), (int)wchar_count);
+    if (!wchar_count) return L"";
+    return std::wstring { buf.data(), wchar_count };
+  }
+
+  std::string narrow(std::wstring wstr) {
+    if (wstr.empty()) return "";
+    int nbytes = WideCharToMultiByte(CP_UTF8, 0, wstr.c_str(), (int)wstr.length(), nullptr, 0, nullptr, nullptr);
+    if (!nbytes) return "";
+    std::vector<char> buf((std::size_t)nbytes);
+    nbytes = WideCharToMultiByte(CP_UTF8, 0, wstr.c_str(), (int)wstr.length(), buf.data(), nbytes, nullptr, nullptr);
+    if (!nbytes) return "";
+    return std::string { buf.data(), (std::size_t)nbytes };
+  }
+
+  wchar_t *_wrealpath(const wchar_t *path, wchar_t *resolved_path) {
+    std::wstring result;
+    wchar_t buf[MAX_PATH];
+    wchar_t *ptr = (((wchar_t *)resolved_path) ? ((wchar_t *)resolved_path) : ((wchar_t *)buf));
+    HANDLE hFile = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_BACKUP_SEMANTICS, nullptr);
+    if (hFile != INVALID_HANDLE_VALUE) {
+      unsigned long len = GetFinalPathNameByHandleW(hFile, ptr, MAX_PATH, FILE_NAME_NORMALIZED | VOLUME_NAME_DOS);
+      if (len && len <= MAX_PATH - 1) {
+        result = ptr;
+        if (!result.substr(0, 8).compare(L"\\\\?\\UNC\\")) {
+          result = L"\\" + result.substr(7);
+        } else if (!result.substr(0, 4).compare(L"\\\\?\\")) {
+          result = result.substr(4);
+        }
+      }
+      CloseHandle(hFile);
+    }
+    if (!result.empty()) {
+      if (!resolved_path) {
+        return _wcsdup(result.c_str());
+      } else {
+        wcsncpy_s(ptr, MAX_PATH, result.c_str(), _TRUNCATE);
+        return (wchar_t *)ptr;
+      }
+    }
+    return nullptr;
+  }
+
+  HANDLE open_process_with_debug_privilege(apiprocess::proc_id_t proc_id) {
+    HANDLE proc = nullptr;
+    HANDLE token = nullptr;
+    LUID luid;
+    TOKEN_PRIVILEGES tkp;
+    if (OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY, &token)) {
+      if (LookupPrivilegeValue(nullptr, SE_DEBUG_NAME, &luid)) {
+        tkp.PrivilegeCount = 1;
+        tkp.Privileges[0].Luid = luid;
+        tkp.Privileges[0].Attributes = SE_PRIVILEGE_ENABLED;
+        if (AdjustTokenPrivileges(token, false, &tkp, sizeof(tkp), nullptr, nullptr)) {
+          proc = OpenProcess(PROCESS_ALL_ACCESS, false, proc_id);
+        }
+      }
+      CloseHandle(token);
+    }
+    if (!proc) {
+      proc = OpenProcess(PROCESS_ALL_ACCESS, false, proc_id);
+    }
+    return proc;
+  }
+
+  std::vector<wchar_t> cmd_env_cwd_from_proc(HANDLE proc, int type) {
+    std::vector<wchar_t> buffer;
+    PEB peb;
+    SIZE_T nRead = 0;
+    ULONG len = 0;
+    PVOID buf = nullptr;
+    PROCESS_BASIC_INFORMATION pbi;
+    RTL_USER_PROCESS_PARAMETERS upp;
+    NTSTATUS status = NtQueryInformationProcess(proc, ProcessBasicInformation, &pbi, sizeof(pbi), &len);
+    ULONG error = RtlNtStatusToDosError(status);
+    if (error) return buffer;
+    ReadProcessMemory(proc, pbi.PebBaseAddress, &peb, sizeof(peb), &nRead);
+    if (!nRead) return buffer;
+    ReadProcessMemory(proc, peb.ProcessParameters, &upp, sizeof(upp), &nRead);
+    if (!nRead) return buffer;
+    if (type == MEMCMD) {
+      buf = upp.CommandLine.Buffer;
+      len = upp.CommandLine.Length;
+    } else if (type == MEMENV) {
+      buf = upp.Environment;
+      len = (ULONG)upp.EnvironmentSize;
+    } else {
+      buf = upp.CurrentDirectory.DosPath.Buffer;
+      len = upp.CurrentDirectory.DosPath.Length;
+    }
+    buffer.resize(len / 2 + 1);
+    ReadProcessMemory(proc, buf, &buffer[0], len, &nRead);
+    if (!nRead) return buffer;
+    buffer[len / 2] = L'\0';
+    return buffer;
+  }
+  #elif (defined(__APPLE__) && defined(__MACH__))
+  enum MEMTYP {
+    MEMCMD,
+    MEMENV
+  };
+
+  std::vector<std::string> cmd_env_from_proc_id(apiprocess::proc_id_t proc_id, int type) {
+    std::vector<std::string> vec;
+    std::size_t len = 0;
+    int argmax = 0, nargs = 0;
+    char *procargs = nullptr, *sp = nullptr, *cp = nullptr;
+    int mib[3];
+    mib[0] = CTL_KERN;
+    mib[1] = KERN_ARGMAX;
+    len = sizeof(argmax);
+    if (sysctl(mib, 2, &argmax, &len, nullptr, 0)) {
+      return vec;
+    }
+    procargs = (char *)malloc(argmax);
+    if (!procargs) {
+      return vec;
+    }
+    mib[0] = CTL_KERN;
+    mib[1] = KERN_PROCARGS2;
+    mib[2] = proc_id;
+    len = argmax;
+    if (sysctl(mib, 3, procargs, &len, nullptr, 0)) {
+      free(procargs);
+      return vec;
+    }
+    memcpy(&nargs, procargs, sizeof(nargs));
+    cp = procargs + sizeof(nargs);
+    for (; cp < &procargs[len]; cp++) {
+      if (*cp == '\0') break;
+    }
+    if (cp == &procargs[len]) {
+      free(procargs);
+      return vec;
+    }
+    for (; cp < &procargs[len]; cp++) {
+      if (*cp != '\0') break;
+    }
+    if (cp == &procargs[len]) {
+      free(procargs);
+      return vec;
+    }
+    sp = cp;
+    int i = 0;
+    while ((*sp != '\0' || i < nargs) && sp < &procargs[len]) {
+      if (type && i >= nargs) {
+        vec.push_back(sp);
+      } else if (!type && i < nargs) {
+        vec.push_back(sp);
+      }
+      sp += strlen(sp) + 1;
+      i++;
+    }
+    free(procargs);
+    return vec;
+  }
+  #elif (defined(__sun) && defined(__SVR4))
+  enum MEMTYP {
+    MEMCMD,
+    MEMENV
+  };
+
+  std::vector<std::string> cmd_env_from_proc_id(apiprocess::proc_id_t proc_id, int type) {
+    std::vector<std::string> vec;
+    auto proc_psinfo_get = [](psinfo_t *psinfo, apiprocess::proc_id_t proc_id) {
+      int fd = -1, retval = 0;
+      std::string procfs_path;
+      if (proc_id == apiprocess::proc_id_from_self()) {
+        procfs_path = "/proc/self/psinfo";
+      } else {
+        procfs_path = std::string("/proc/") + std::to_string(proc_id) + std::string("/psinfo");
+      }
+      if ((fd = open(procfs_path.c_str(), O_RDONLY)) == -1) {
+        return ESRCH;
+      }
+      if (pread(fd, psinfo, sizeof(psinfo_t), 0) != sizeof(psinfo_t)) {
+        retval = errno;
+      }
+      close(fd);
+      return retval;
+    };
+    psinfo_t psinfo;
+    char buffer[BUFSIZ];
+    std::string procfs_path;
+    int n = 0, err = 0, fd = -1;
+    std::size_t nread = 0;
+    unsigned args_size = 0;
+    char **args = (char **)malloc(ARG_MAX);
+    if (!args) goto finish;
+    psinfo.pr_dmodel = 0;
+    err = proc_psinfo_get(&psinfo, proc_id);
+    if (err) {
+      free(args);
+      goto finish;
+    }
+    args_size = sizeof(*args) * ARG_MAX;
+    if (proc_id == apiprocess::proc_id_from_self()) {
+      procfs_path = "/proc/self/as";
+    } else {
+      procfs_path = std::string("/proc/") + std::to_string(proc_id) + std::string("/as");
+    }
+    if ((fd = open(procfs_path.c_str(), O_RDONLY)) == -1) {
+      free(args);
+      goto finish;
+    }
+    if (args_size > sizeof(args)) {
+      free(args);
+      args = (char **)malloc(args_size);
+      if (!args) goto finish;
+    }
+    if ((long)(nread = pread(fd, args, args_size, (off_t)((type != MEMCMD) ? psinfo.pr_envp : psinfo.pr_argv))) <= 0) {
+      close(fd);
+    }
+    for (n = 0; args[n]; n++) {
+      int len = 0;
+      char *arg = nullptr;
+      if ((long)(nread = pread(fd, buffer, sizeof(buffer), (off_t)args[n])) <= 0) {
+        close(fd);
+        break;
+      }
+      len = strlen(buffer) + 1;
+      arg = (char *)malloc(len);
+      if (!arg) {
+        if (args) free(args);
+        vec.clear();
+        goto finish;
+      }
+      memcpy(arg, buffer, len);
+      vec.push_back(arg);
+    }
+    if (args) {
+      free(args);
+    }
+    finish:
+    if (fd != -1) {
+      close(fd);
+    }
+    return vec;
+  }
+  #endif
+
+  bool proc_id_is_kernel_thread(apiprocess::proc_id_t proc_id) {
+    bool retval = false;
+    #if (defined(_WIN32) || defined(_WIN64))
+    HANDLE hp = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (!hp) return retval;
+    PROCESSENTRY32 pe;
+    pe.dwSize = sizeof(PROCESSENTRY32);
+    if (Process32First(hp, &pe)) {
+      do {
+        message_pump();
+        if (pe.th32ProcessID == proc_id) {
+          std::string comm = pe.szExeFile; std::size_t len = comm.length();
+          retval = (len < 4 || comm.substr(len - 4).compare(".exe"));
+          break;
+        }
+      } while (Process32Next(hp, &pe));
+    }
+    CloseHandle(hp);
+    #elif (defined(__APPLE__) && defined(__MACH__))
+    proc_bsdinfo proc_info;
+    if (proc_pidinfo(proc_id, PROC_PIDTBSDINFO, 0, &proc_info, sizeof(proc_info)) > 0) {
+      retval = (proc_info.pbi_flags & P_SYSTEM);
+    }
+    #elif (defined(__linux__) || defined(__ANDROID__))
+    std::string procfs_path;
+    if (proc_id == apiprocess::proc_id_from_self()) {
+      procfs_path = "/proc/self/stat";
+    } else {
+      procfs_path = std::string("/proc/") + std::to_string(proc_id) + std::string("/stat");
+    }
+    std::ifstream file(procfs_path);
+    if (!file.is_open()) {
+      return retval;
+    }
+    std::string content;
+    std::getline(file, content);
+    size_t last_closing_parentheses = content.rfind(')');
+    if (last_closing_parentheses == std::string::npos || last_closing_parentheses + 2 >= content.length()) {
+      return retval;
+    }
+    std::string rest_of_file = content.substr(last_closing_parentheses + 2);
+    std::istringstream iss(rest_of_file);
+    std::string token;
+    int current_field_index = 3; 
+    unsigned long flags = 0;
+    while (iss >> token) {
+      if (current_field_index == 9) {
+        flags = strtoul(token.c_str(), nullptr, 10);
+        break;
+      }
+      current_field_index++;
+    }
+    retval = (flags & PF_KTHREAD);
+    #elif (defined(__FreeBSD__) || defined(__FreeBSD_kernel__))
+    int cntp = 0;
+    kvm_t *kd = nullptr;
+    kinfo_proc *proc_info = nullptr;
+    const char *nlistf = "/dev/null";
+    const char *memf   = "/dev/null";
+    kd = kvm_openfiles(nlistf, memf, nullptr, O_RDONLY, nullptr);
+    if (!kd) return retval;
+    if ((proc_info = kvm_getprocs(kd, KERN_PROC_PID, proc_id, &cntp))) {
+      retval = ((proc_info->ki_flag & P_SYSTEM) && proc_info->ki_pid != 1);
+    }
+    kvm_close(kd);
+    #elif defined(__DragonFly__)
+    int cntp = 0;
+    kvm_t *kd = nullptr;
+    kinfo_proc *proc_info = nullptr;
+    const char *nlistf = "/dev/null";
+    const char *memf   = "/dev/null";
+    kd = kvm_openfiles(nlistf, memf, nullptr, O_RDONLY, nullptr);
+    if (!kd) return retval;
+    if ((proc_info = kvm_getprocs(kd, KERN_PROC_PID, proc_id, &cntp))) {
+      retval = ((proc_info->kp_flags & P_SYSTEM) && proc_info->kp_pid != 1);
+    }
+    kvm_close(kd);
+    #elif defined(__NetBSD__)
+    int cntp = 0;
+    kvm_t *kd = nullptr;
+    kinfo_proc2 *proc_info = nullptr;
+    kd = kvm_openfiles(nullptr, nullptr, nullptr, KVM_NO_FILES, nullptr);
+    if (!kd) return retval;
+    if ((proc_info = kvm_getproc2(kd, KERN_PROC_PID, proc_id, sizeof(struct kinfo_proc2), &cntp))) {
+      retval = (proc_info->p_flag & P_SYSTEM);
+    }
+    kvm_close(kd);
+    #elif defined(__OpenBSD__)
+    int cntp = 0;
+    kvm_t *kd = nullptr;
+    kinfo_proc *proc_info = nullptr;
+    kd = kvm_openfiles(nullptr, nullptr, nullptr, KVM_NO_FILES, nullptr);
+    if (!kd) return retval;
+    if ((proc_info = kvm_getprocs(kd, KERN_PROC_PID, proc_id, sizeof(struct kinfo_proc), &cntp))) {
+      retval = (proc_info->p_flag & P_SYSTEM);
+    }
+    kvm_close(kd);
+    #elif (defined(__sun) && defined(__SVR4))
+    auto proc_pstatus_get = [](pstatus_t *pstatus, apiprocess::proc_id_t proc_id) {
+      int fd = -1, retval = -1;
+      std::string procfs_path;
+      if (proc_id == apiprocess::proc_id_from_self()) {
+        procfs_path = "/proc/self/status";
+      } else {
+        procfs_path = std::string("/proc/") + std::to_string(proc_id) + std::string("/status");
+      }
+      if ((fd = open(procfs_path.c_str(), O_RDONLY)) != -1) {
+        if (read(fd, pstatus, sizeof(*pstatus)) == sizeof(*pstatus)) {
+          retval = 0;
+        }
+        close(fd);
+      }
+      return retval;
+    };
+    pstatus_t pstatus;
+    if (!proc_pstatus_get(&pstatus, proc_id)) {
+      retval = ((pstatus.pr_flags & PR_ISSYS) || pstatus.pr_pid == 0);
+      return retval;
+    }
+    struct pid cur_pid;
+    kvm_t *kd = nullptr;
+    struct proc *proc_info = nullptr;
+    kd = kvm_open(nullptr, nullptr, nullptr, O_RDONLY, nullptr);
+    if (!kd) return retval;
+    if ((proc_info = kvm_getproc(kd, proc_id))) {
+      if (kvm_kread(kd, (std::uintptr_t)proc_info->p_pidp, &cur_pid, sizeof(cur_pid)) != -1) {
+        retval = ((proc_info->p_flag & SSYS) || cur_pid.pid_id == 0);
+      }
+    }
+    kvm_close(kd);
+    #endif
+    return retval;
+  }
+
+  // Linux does not support the precision necessary for this function to consistently be relied upon in a cross-platform context:
+  bool proc_id_and_parent_proc_id_compare_creation_time(apiprocess::proc_id_t proc_id, apiprocess::proc_id_t parent_proc_id) {
+    #if (defined(_WIN32) || defined(_WIN64))
+    bool result = false;
+    HANDLE proc_handle = nullptr, parent_proc_handle = nullptr;
+    if ((proc_handle = open_process_with_debug_privilege(proc_id))) {
+      if ((parent_proc_handle = open_process_with_debug_privilege(parent_proc_id))) {
+        FILETIME proc_creation_time, proc_exit_time, proc_kernel_time, proc_user_time;
+        FILETIME parent_proc_creation_time, parent_proc_exit_time, parent_proc_kernel_time, parent_proc_user_time;
+        if (GetProcessTimes(proc_handle, &proc_creation_time, &proc_exit_time, &proc_kernel_time, &proc_user_time) &&
+          GetProcessTimes(parent_proc_handle, &parent_proc_creation_time, &parent_proc_exit_time, &parent_proc_kernel_time, &parent_proc_user_time)) {
+          result = (CompareFileTime(&proc_creation_time, &parent_proc_creation_time) == 1);
+        }
+        CloseHandle(parent_proc_handle);
+      }
+      CloseHandle(proc_handle);
+    }
+    return result;
+    #elif (defined(__APPLE__) && defined(__MACH__))
+    std::uint64_t child_sec = 0, parent_sec = 0;
+    std::uint64_t child_usec = 0, parent_usec = 0;
+    proc_bsdinfo proc_info;
+    if (proc_pidinfo(proc_id, PROC_PIDTBSDINFO, 0, &proc_info, sizeof(proc_info)) > 0) {
+      child_sec = proc_info.pbi_start_tvsec;
+      child_usec = proc_info.pbi_start_tvusec;
+    }
+    if (proc_pidinfo(parent_proc_id, PROC_PIDTBSDINFO, 0, &proc_info, sizeof(proc_info)) > 0) {
+      parent_sec = proc_info.pbi_start_tvsec;
+      parent_usec = proc_info.pbi_start_tvusec;
+    }
+    return (child_sec >= parent_sec && child_usec > parent_usec);
+    #elif (defined(__linux__) || defined(__ANDROID__))
+    time_t child_sec = 0, parent_sec = 0;
+    long long child_msec = 0, parent_msec = 0;
+    auto system_get_boot_time = []() {
+      long long retval = 0;
+      std::ifstream file("/proc/stat");
+      std::string line;
+      while (std::getline(file, line)) {
+        if (line.rfind("btime", 0) == 0) {
+          std::string label;
+          long long btime;
+          std::istringstream iss(line);
+          iss >> label >> btime;
+          retval = btime;
+          break;
+        }
+      }
+      return retval;
+    };
+    auto proc_id_get_clock_ticks = [](apiprocess::proc_id_t proc_id) {
+      long long retval = 0;
+      std::string procfs_path;
+      if (proc_id == apiprocess::proc_id_from_self()) {
+        procfs_path = "/proc/self/stat";
+      } else {
+        procfs_path = std::string("/proc/") + std::to_string(proc_id) + std::string("/stat");
+      }
+      std::ifstream file(procfs_path);
+      if (!file.is_open()) {
+        return retval;
+      }
+      std::string content;
+      std::getline(file, content);
+      std::size_t last_closing_parentheses = content.rfind(')');
+      if (last_closing_parentheses == std::string::npos || last_closing_parentheses + 2 >= content.length()) {
+        return retval; 
+      }
+      std::string rest_of_file = content.substr(last_closing_parentheses + 2);
+      std::istringstream iss(rest_of_file);
+      std::string token;
+      std::vector<std::string> fields;
+      while (iss >> token) {
+        fields.push_back(token);
+      }
+      if (fields.size() >= 20) {
+        retval = std::strtoll(fields[19].c_str(), nullptr, 10);
+      }
+      return retval;
+    };
+    long clock_ticks_per_sec = sysconf(_SC_CLK_TCK);
+    long long btime_secs = system_get_boot_time();
+    long long child_clock_ticks = proc_id_get_clock_ticks(proc_id);
+    if (btime_secs == 0 || child_clock_ticks == 0 || clock_ticks_per_sec <= 0) {
+      return false;
+    }
+    long long child_total_msec_from_boot = (child_clock_ticks * 1000) / clock_ticks_per_sec;
+    long long child_epoch_msec = (btime_secs * 1000) + child_total_msec_from_boot;
+    child_sec = child_epoch_msec / 1000;
+    child_msec = child_epoch_msec % 1000;
+    long long parent_clock_ticks = proc_id_get_clock_ticks(parent_proc_id);
+    if (btime_secs == 0 || parent_clock_ticks == 0 || clock_ticks_per_sec <= 0) {
+      return false;
+    }
+    long long parent_total_msec_from_boot = (parent_clock_ticks * 1000) / clock_ticks_per_sec;
+    long long parent_epoch_msec = (btime_secs * 1000) + parent_total_msec_from_boot;
+    parent_sec = parent_epoch_msec / 1000;
+    parent_msec = parent_epoch_msec % 1000;
+    return (child_sec >= parent_sec && child_msec > parent_msec);
+    #elif (defined(__FreeBSD__) || defined(__FreeBSD_kernel__))
+    time_t child_sec = 0, parent_sec = 0;
+    long child_usec = 0, parent_usec = 0;
+    int cntp = 0;
+    kvm_t *kd = nullptr;
+    kinfo_proc *proc_info = nullptr;
+    const char *nlistf = "/dev/null";
+    const char *memf   = "/dev/null";
+    kd = kvm_openfiles(nlistf, memf, nullptr, O_RDONLY, nullptr);
+    if (!kd) return false;
+    if ((proc_info = kvm_getprocs(kd, KERN_PROC_PID, proc_id, &cntp))) {
+      child_sec = proc_info->ki_start.tv_sec;
+      child_usec = proc_info->ki_start.tv_usec;
+    }
+    kvm_close(kd);
+    kd = kvm_openfiles(nlistf, memf, nullptr, O_RDONLY, nullptr);
+    if (!kd) return false;
+    if ((proc_info = kvm_getprocs(kd, KERN_PROC_PID, parent_proc_id, &cntp))) {
+      parent_sec = proc_info->ki_start.tv_sec;
+      parent_usec = proc_info->ki_start.tv_usec;
+    }
+    kvm_close(kd);
+    return (child_sec >= parent_sec && child_usec > parent_usec);
+    #elif defined(__DragonFly__)
+    time_t child_sec = 0, parent_sec = 0;
+    long child_usec = 0, parent_usec = 0;
+    int cntp = 0;
+    kvm_t *kd = nullptr;
+    kinfo_proc *proc_info = nullptr;
+    const char *nlistf = "/dev/null";
+    const char *memf   = "/dev/null";
+    kd = kvm_openfiles(nlistf, memf, nullptr, O_RDONLY, nullptr);
+    if (!kd) return false;
+    if ((proc_info = kvm_getprocs(kd, KERN_PROC_PID, proc_id, &cntp))) {
+      child_sec = proc_info->kp_start.tv_sec;
+      child_usec = proc_info->kp_start.tv_usec;
+    }
+    kvm_close(kd);
+    kd = kvm_openfiles(nlistf, memf, nullptr, O_RDONLY, nullptr);
+    if (!kd) return false;
+    if ((proc_info = kvm_getprocs(kd, KERN_PROC_PID, parent_proc_id, &cntp))) {
+      parent_sec = proc_info->kp_start.tv_sec;
+      parent_usec = proc_info->kp_start.tv_usec;
+    }
+    kvm_close(kd);
+    return (child_sec >= parent_sec && child_usec > parent_usec);
+    #elif defined(__NetBSD__)
+    std::uint32_t child_sec = 0, parent_sec = 0;
+    std::uint32_t child_usec = 0, parent_usec = 0;
+    int cntp = 0;
+    kvm_t *kd = nullptr;
+    kinfo_proc2 *proc_info = nullptr;
+    kd = kvm_openfiles(nullptr, nullptr, nullptr, KVM_NO_FILES, nullptr);
+    if (!kd) return false;
+    if ((proc_info = kvm_getproc2(kd, KERN_PROC_PID, proc_id, sizeof(struct kinfo_proc2), &cntp))) {
+      child_sec = proc_info->p_rtime_sec;
+      child_usec = proc_info->p_rtime_usec;
+    }
+    kvm_close(kd);
+    kd = kvm_openfiles(nullptr, nullptr, nullptr, KVM_NO_FILES, nullptr);
+    if (!kd) return false;
+    if ((proc_info = kvm_getproc2(kd, KERN_PROC_PID, parent_proc_id, sizeof(struct kinfo_proc2), &cntp))) {
+      parent_sec = proc_info->p_rtime_sec;
+      parent_usec = proc_info->p_rtime_usec;
+    }
+    kvm_close(kd);
+    return (child_sec >= parent_sec && child_usec > parent_usec);
+    #elif defined(__OpenBSD__)
+    std::uint32_t child_sec = 0, parent_sec = 0;
+    std::uint32_t child_usec = 0, parent_usec = 0;
+    int cntp = 0;
+    kvm_t *kd = nullptr;
+    kinfo_proc *proc_info = nullptr;
+    kd = kvm_openfiles(nullptr, nullptr, nullptr, KVM_NO_FILES, nullptr);
+    if (!kd) return false;
+    if ((proc_info = kvm_getprocs(kd, KERN_PROC_PID, proc_id, sizeof(struct kinfo_proc), &cntp))) {
+      child_sec = proc_info->p_rtime_sec;
+      child_usec = proc_info->p_rtime_usec;
+    }
+    kvm_close(kd);
+    kd = kvm_openfiles(nullptr, nullptr, nullptr, KVM_NO_FILES, nullptr);
+    if (!kd) return false;
+    if ((proc_info = kvm_getprocs(kd, KERN_PROC_PID, parent_proc_id, sizeof(struct kinfo_proc), &cntp))) {
+      parent_sec = proc_info->p_rtime_sec;
+      parent_usec = proc_info->p_rtime_usec;
+    }
+    kvm_close(kd);
+    return (child_sec >= parent_sec && child_usec > parent_usec);
+    #elif (defined(__sun) && defined(__SVR4))
+    time_t child_sec = 0, parent_sec = 0;
+    long child_nsec = 0, parent_nsec = 0;
+    auto proc_psinfo_get = [](psinfo_t *psinfo, apiprocess::proc_id_t proc_id) {
+      int fd = -1, retval = -1;
+      std::string procfs_path;
+      if (proc_id == apiprocess::proc_id_from_self()) {
+        procfs_path = "/proc/self/psinfo";
+      } else {
+        procfs_path = std::string("/proc/") + std::to_string(proc_id) + std::string("/psinfo");
+      }
+      if ((fd = open(procfs_path.c_str(), O_RDONLY)) != -1) {
+        if (read(fd, psinfo, sizeof(*psinfo)) == sizeof(*psinfo)) {
+          retval = 0;
+        }
+        close(fd);
+      }
+      return retval;
+    };
+    psinfo_t psinfo;
+    if (!proc_psinfo_get(&psinfo, proc_id)) {
+      child_sec = psinfo.pr_start.tv_sec;
+      child_nsec = psinfo.pr_start.tv_nsec;
+    }
+    if (!proc_psinfo_get(&psinfo, parent_proc_id)) {
+      parent_sec = psinfo.pr_start.tv_sec;
+      parent_nsec = psinfo.pr_start.tv_nsec;
+    }
+    if (child_sec == 0 && parent_sec == 0 && child_nsec == 0 && parent_nsec == 0) {
+      kvm_t *kd = nullptr;
+      struct proc *proc_info = nullptr;
+      kd = kvm_open(nullptr, nullptr, nullptr, O_RDONLY, nullptr);
+      if (!kd) false;
+      if ((proc_info = kvm_getproc(kd, proc_id))) {
+        child_sec = proc_info->p_user.u_start.tv_sec;
+        child_nsec = proc_info->p_user.u_start.tv_nsec;
+      }
+      kvm_close(kd);
+      kd = kvm_open(nullptr, nullptr, nullptr, O_RDONLY, nullptr);
+      if (!kd) false;
+      if ((proc_info = kvm_getproc(kd, parent_proc_id))) {
+        parent_sec = proc_info->p_user.u_start.tv_sec;
+        parent_nsec = proc_info->p_user.u_start.tv_nsec;
+      }
+      kvm_close(kd);
+    }
+    return (child_sec >= parent_sec && child_nsec > parent_nsec);
+    #endif
+    return false;
+  }
+
+  std::unordered_map<apiprocess::proc_id_t, std::intptr_t> stdipt_map;
+  std::unordered_map<apiprocess::proc_id_t, std::string> stdopt_map;
+  std::unordered_map<apiprocess::proc_id_t, bool> complete_map;
+  std::unordered_map<int, apiprocess::proc_id_t> child_proc_id;
+  std::unordered_map<int, bool> proc_did_execute;
+  std::mutex complete_mutex;
+  std::mutex stdopt_mutex;
+  long long optlmt = 0;
+  int ind = -1;
+
+  #if (!defined(_WIN32) && !defined(_WIN64))
+  apiprocess::proc_id_t process_execute_helper(const char *command, int *infp, int *outfp) {
+    int p_stdin[2];
+    int p_stdout[2];
+    apiprocess::proc_id_t pid = -1;
+    if (pipe(p_stdin) == -1)
+      return -1;
+    if (pipe(p_stdout) == -1) {
+      close(p_stdin[0]);
+      close(p_stdin[1]);
+      return -1;
+    }
+    pid = fork();
+    if (pid < 0) {
+      close(p_stdin[0]);
+      close(p_stdin[1]);
+      close(p_stdout[0]);
+      close(p_stdout[1]);
+      return pid;
+    } else if (pid == 0) {
+      close(p_stdin[1]);
+      dup2(p_stdin[0], 0);
+      close(p_stdout[0]);
+      dup2(p_stdout[1], 1);
+      #if defined(NULLIFY_STDERR)
+      dup2(open("/dev/null", O_RDONLY), 2);
+      #else
+      dup2(p_stdout[1], 2);
+      #endif
+      for (int i = 3; i < 4096; i++)
+        close(i);
+      setsid();
+      #if !defined(__ANDROID__)
+      execl("/bin/sh", "sh", "-c", command, nullptr);
+      #else
+      execl("/system/bin/sh", "sh", "-c", command, nullptr);
+      #endif
+      _exit(-1);
+    }
+    close(p_stdin[0]);
+    close(p_stdout[1]);
+    if (!infp) {
+      close(p_stdin[1]);
+    } else {
+      *infp = p_stdin[1];
+    }
+    if (!outfp) {
+      close(p_stdout[0]);
+    } else {
+      *outfp = p_stdout[0];
+    }
+    return pid;
+  }
+  #endif
+
+  void output_thread(std::intptr_t file, apiprocess::proc_id_t proc_index) {
+    #if (!defined(_WIN32) && !defined(_WIN64))
+    ssize_t nRead = 0; char buffer[BUFSIZ];
+    while ((nRead = read((int)file, buffer, BUFSIZ)) > 0) {
+      buffer[nRead] = '\0';
+    #else
+    unsigned long nRead = 0; char buffer[BUFSIZ];
+    while (ReadFile((HANDLE)(void *)file, buffer, BUFSIZ, &nRead, nullptr) && nRead) {
+      message_pump();
+      buffer[nRead] = '\0';
+    #endif
+      std::lock_guard<std::mutex> guard(stdopt_mutex);
+      stdopt_map[proc_index].append(buffer, nRead);
+      long long limit = stdopt_map[proc_index].length() -
+      ((optlmt) ? optlmt : stdopt_map[proc_index].length());
+      limit = ((limit < 0) ? 0 : limit);
+      stdopt_map[proc_index] = stdopt_map[proc_index].substr(limit);
+    }
+  }
+
+  #if (!defined(_WIN32) && !defined(_WIN64))
+  apiprocess::proc_id_t proc_id_from_fork_proc_id(apiprocess::proc_id_t proc_id) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    std::vector<apiprocess::proc_id_t> ppid = apiprocess::proc_id_from_parent_proc_id(proc_id);
+    if (!ppid.empty()) proc_id = ppid[0];
+    return proc_id;
+  }
+  #endif
+
+  apiprocess::proc_id_t spawn_child_proc_id_helper(std::string command) {
+    ind++;
+    #if (!defined(_WIN32) && !defined(_WIN64))
+    int infd = 0, outfd = 0;
+    apiprocess::proc_id_t proc_id = 0, fork_proc_id = 0, wait_proc_id = 0;
+    fork_proc_id = process_execute_helper(command.c_str(), &infd, &outfd);
+    proc_id = fork_proc_id; wait_proc_id = proc_id;
+    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    if (fork_proc_id != -1) {
+      while ((proc_id = proc_id_from_fork_proc_id(proc_id)) == wait_proc_id) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        int status = 0; wait_proc_id = waitpid(fork_proc_id, &status, WNOHANG);
+        std::string exe = apiprocess::exe_from_proc_id(fork_proc_id);
+        if (exe.empty()) {
+          break;
+        }
+        char shlbuf[PATH_MAX];
+        #if !defined(__ANDROID__)
+        const char *shl = "/bin/sh";
+        #else
+        const char *shl = "/system/bin/sh";
+        #endif
+        if (realpath(shl, shlbuf)) {
+          if (strcmp(exe.c_str(), shlbuf) == 0) {
+            if (wait_proc_id > 0)
+              proc_id = wait_proc_id;
+          } else {
+            break;
+          }
+        } else {
+          break;
+        }
+      }
+    }
+    child_proc_id[ind] = proc_id; std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    proc_did_execute[ind] = true; apiprocess::proc_id_t proc_index = proc_id;
+    stdipt_map[proc_index] = (std::intptr_t)infd;
+    std::thread opt_thread(output_thread, (std::intptr_t)outfd, proc_index);
+    opt_thread.join();
+    #else
+    std::wstring wstr_command = widen(command); bool proceed = true;
+    wchar_t *cwstr_command = new wchar_t[wstr_command.length() + 1]();
+    wcsncpy_s(cwstr_command, wstr_command.length() + 1, wstr_command.c_str(), wstr_command.length() + 1);
+    HANDLE stdin_read = nullptr; HANDLE stdin_write = nullptr;
+    HANDLE stdout_read = nullptr; HANDLE stdout_write = nullptr;
+    SECURITY_ATTRIBUTES sa = { sizeof(SECURITY_ATTRIBUTES), nullptr, true };
+    proceed = CreatePipe(&stdin_read, &stdin_write, &sa, 0);
+    if (proceed == false) return 0;
+    SetHandleInformation(stdin_write, HANDLE_FLAG_INHERIT, 0);
+    proceed = CreatePipe(&stdout_read, &stdout_write, &sa, 0);
+    if (proceed == false) return 0;
+    STARTUPINFOW si;
+    ZeroMemory(&si, sizeof(si));
+    si.cb = sizeof(STARTUPINFOW);
+    si.dwFlags = STARTF_USESTDHANDLES;
+    #if defined(NULLIFY_STDERR)
+    si.hStdError = nullptr;
+    #else
+    si.hStdError = stdout_write;
+    #endif
+    si.hStdOutput = stdout_write;
+    si.hStdInput = stdin_read;
+    PROCESS_INFORMATION pi; ZeroMemory(&pi, sizeof(pi)); apiprocess::proc_id_t proc_index = 0;
+    BOOL success = CreateProcessW(nullptr, cwstr_command, nullptr, nullptr, true, CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi);
+    delete[] cwstr_command;
+    if (success) {
+      CloseHandle(stdout_write);
+      CloseHandle(stdin_read);
+      apiprocess::proc_id_t proc_id = pi.dwProcessId; child_proc_id[ind] = proc_id; proc_index = proc_id;
+      std::this_thread::sleep_for(std::chrono::milliseconds(5)); proc_did_execute[ind] = true;
+      stdipt_map[proc_index] = (std::intptr_t)(void *)stdin_write;
+      HANDLE wait_handles[] = { pi.hProcess, stdout_read };
+      std::thread opt_thread(output_thread, (std::intptr_t)(void *)stdout_read, proc_index);
+      while (MsgWaitForMultipleObjects(2, wait_handles, false, 5, QS_ALLEVENTS) != WAIT_OBJECT_0) {
+        message_pump();
+      }
+      opt_thread.join();
+      CloseHandle(pi.hProcess);
+      CloseHandle(pi.hThread);
+      CloseHandle(stdout_read);
+      CloseHandle(stdin_write);
+    } else {
+      proc_did_execute[ind] = true;
+      child_proc_id[ind] = 0;
+    }
+    #endif
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    std::lock_guard<std::mutex> guard(complete_mutex);
+    complete_map[proc_index] = true;
+    return proc_index;
+  }
+
+} // anonymous namespace
+
+namespace apiprocess {
+
+  proc_id_t proc_id_from_self() {
+    #if (!defined(_WIN32) && !defined(_WIN64))
+    return getpid();
+    #else
+    return GetCurrentProcessId();
+    #endif
+  }
+
+  std::vector<proc_id_t> proc_id_enum() {
+    std::vector<proc_id_t> vec;
+    #if (defined(_WIN32) || defined(_WIN64))
+    HANDLE hp = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (!hp) return vec;
+    PROCESSENTRY32 pe;
+    pe.dwSize = sizeof(PROCESSENTRY32);
+    if (Process32First(hp, &pe)) {
+      do {
+        message_pump();
+        std::string comm = pe.szExeFile; std::size_t len = comm.length();
+        if (len >= 4 && !comm.substr(len - 4).compare(".exe")) {
+          vec.push_back(pe.th32ProcessID);
+        }
+      } while (Process32Next(hp, &pe));
+    }
+    CloseHandle(hp);
+    #elif (defined(__APPLE__) && defined(__MACH__))
+    std::vector<proc_id_t> proc_info;
+    proc_info.resize(proc_listpids(PROC_ALL_PIDS, 0, nullptr, 0));
+    int cntp = proc_listpids(PROC_ALL_PIDS, 0, &proc_info[0], sizeof(proc_id_t) * proc_info.size());
+    for (int i = cntp - 1; i >= 0; i--) {
+      if (proc_info[i] > 0) {
+        if (!proc_id_is_kernel_thread(proc_info[i])) {
+          vec.push_back(proc_info[i]);
+        }
+      }
+    }
+    #elif ((defined(__linux__) || defined(__ANDROID__)) || (defined(__sun) && defined(__SVR4)))
+    DIR *proc = opendir("/proc");
+    if (!proc) return vec;
+    struct dirent *ent = nullptr;
+    proc_id_t tgid = 0;
+    while ((ent = readdir(proc))) {
+      if (isdigit(*ent->d_name)) {
+        tgid = strtoul(ent->d_name, nullptr, 10);
+        if (!proc_id_is_kernel_thread(tgid)) {
+          vec.push_back(tgid);
+        }
+      }
+    }
+    closedir(proc);
+    #elif (defined(__FreeBSD__) || defined(__FreeBSD_kernel__))
+    int cntp = 0;
+    kvm_t *kd = nullptr;
+    kinfo_proc *proc_info = nullptr;
+    const char *nlistf = "/dev/null";
+    const char *memf   = "/dev/null";
+    kd = kvm_openfiles(nlistf, memf, nullptr, O_RDONLY, nullptr);
+    if (!kd) return vec;
+    if ((proc_info = kvm_getprocs(kd, KERN_PROC_PROC, 0, &cntp))) {
+      for (int i = 0; i < cntp; i++) {
+        if (!(proc_info[i].ki_flag & P_SYSTEM) || proc_info[i].ki_pid == 1) {
+          vec.push_back(proc_info[i].ki_pid);
+        }
+      }
+    }
+    kvm_close(kd);
+    #elif defined(__DragonFly__)
+    int cntp = 0;
+    kvm_t *kd = nullptr;
+    kinfo_proc *proc_info = nullptr;
+    const char *nlistf = "/dev/null";
+    const char *memf   = "/dev/null";
+    kd = kvm_openfiles(nlistf, memf, nullptr, O_RDONLY, nullptr);
+    if (!kd) return vec;
+    if ((proc_info = kvm_getprocs(kd, KERN_PROC_ALL, 0, &cntp))) {
+      for (int i = 0; i < cntp; i++) {
+        if (!(proc_info[i].kp_flags & P_SYSTEM) || proc_info[i].kp_pid == 1) {
+          vec.push_back(proc_info[i].kp_pid);
+        }
+      }
+    }
+    kvm_close(kd);
+    #elif defined(__NetBSD__)
+    int cntp = 0;
+    kvm_t *kd = nullptr;
+    kinfo_proc2 *proc_info = nullptr;
+    kd = kvm_openfiles(nullptr, nullptr, nullptr, KVM_NO_FILES, nullptr);
+    if (!kd) return vec;
+    if ((proc_info = kvm_getproc2(kd, KERN_PROC_ALL, 0, sizeof(struct kinfo_proc2), &cntp))) {
+      for (int i = cntp - 1; i >= 0; i--) {
+        if (!(proc_info[i].p_flag & P_SYSTEM)) {
+          vec.push_back(proc_info[i].p_pid);
+        }
+      }
+    }
+    kvm_close(kd);
+    #elif defined(__OpenBSD__)
+    int cntp = 0;
+    kvm_t *kd = nullptr;
+    kinfo_proc *proc_info = nullptr;
+    kd = kvm_openfiles(nullptr, nullptr, nullptr, KVM_NO_FILES, nullptr);
+    if (!kd) return vec;
+    if ((proc_info = kvm_getprocs(kd, KERN_PROC_ALL, 0, sizeof(struct kinfo_proc), &cntp))) {
+      for (int i = cntp - 1; i >= 0; i--) {
+        if (!(proc_info[i].p_flag & P_SYSTEM)) {
+          vec.push_back(proc_info[i].p_pid);
+        }
+      }
+    }
+    kvm_close(kd);
+    #endif
+    #if (defined(__sun) && defined(__SVR4))
+    struct pid cur_pid;
+    kvm_t *kd = nullptr;
+    struct proc *proc_info = nullptr;
+    if (!vec.empty()) { 
+      goto finish;
+    }
+    kd = kvm_open(nullptr, nullptr, nullptr, O_RDONLY, nullptr);
+    if (!kd) return vec;
+    while ((proc_info = kvm_nextproc(kd))) {
+      if (kvm_kread(kd, (std::uintptr_t)proc_info->p_pidp, &cur_pid, sizeof(cur_pid)) != -1) {
+        if (!(proc_info->p_flag & SSYS) && cur_pid.pid_id != 0) {
+          vec.insert(vec.begin(), cur_pid.pid_id);
+        }
+      }
+    }
+    kvm_close(kd);
+    finish:
+    #endif
+    std::sort(vec.begin(), vec.end());
+    return vec;
+  }
+
+  bool proc_id_exists(proc_id_t proc_id) {
+    #if (!defined(_WIN32) && !defined(_WIN64))
+    if (proc_id < 0) return false;
+    #endif
+    std::vector<proc_id_t> vec = proc_id_enum();
+    auto itr = std::find(vec.begin(), vec.end(), proc_id);
+    return (itr != vec.end());
+  }
+
+  bool proc_id_suspend(proc_id_t proc_id) {
+    #if (!defined(_WIN32) && !defined(_WIN64))
+    if (proc_id < 0) return false;
+    #endif
+    #if (!defined(_WIN32) && !defined(_WIN64))
+    return (!kill(proc_id, SIGSTOP));
+    #else
+    HANDLE proc = open_process_with_debug_privilege(proc_id);
+    if (!proc) return false;
+    typedef NTSTATUS (__stdcall *NTSP)(IN HANDLE ProcessHandle);
+    HMODULE hModule = GetModuleHandleW(L"ntdll.dll");
+    if (!hModule) return false;
+    FARPROC farProc = GetProcAddress(hModule, "NtSuspendProcess");
+    if (!farProc) return false;
+    NTSP NtSuspendProcess = (NTSP)farProc;
+    NTSTATUS status = NtSuspendProcess(proc);
+    ULONG error = RtlNtStatusToDosError(status);
+    CloseHandle(proc);
+    return (!error);
+    #endif
+  }
+
+  bool proc_id_resume(proc_id_t proc_id) {
+    #if (!defined(_WIN32) && !defined(_WIN64))
+    if (proc_id < 0) return false;
+    #endif
+    #if (!defined(_WIN32) && !defined(_WIN64))
+    return (!kill(proc_id, SIGCONT));
+    #else
+    HANDLE proc = open_process_with_debug_privilege(proc_id);
+    if (!proc) return false;
+    typedef NTSTATUS (__stdcall *NTRP)(IN HANDLE ProcessHandle);
+    HMODULE hModule = GetModuleHandleW(L"ntdll.dll");
+    if (!hModule) return false;
+    FARPROC farProc = GetProcAddress(hModule, "NtResumeProcess");
+    if (!farProc) return false;
+    NTRP NtResumeProcess = (NTRP)farProc;
+    NTSTATUS status = NtResumeProcess(proc);
+    ULONG error = RtlNtStatusToDosError(status);
+    CloseHandle(proc);
+    return (!error);
+    #endif
+  }
+
+  bool proc_id_kill(proc_id_t proc_id) {
+    #if (!defined(_WIN32) && !defined(_WIN64))
+    if (proc_id < 0) return false;
+    #endif
+    #if (!defined(_WIN32) && !defined(_WIN64))
+    return (!kill(proc_id, SIGKILL));
+    #else
+    HANDLE proc = open_process_with_debug_privilege(proc_id);
+    if (!proc) return false;
+    bool result = TerminateProcess(proc, 0);
+    CloseHandle(proc);
+    return result;
+    #endif
+  }
+
+  std::vector<proc_id_t> parent_proc_id_from_proc_id(proc_id_t proc_id) {
+    std::vector<proc_id_t> vec;
+    #if (!defined(_WIN32) && !defined(_WIN64))
+    if (proc_id < 0) return vec;
+    #endif
+    #if (defined(_WIN32) || defined(_WIN64))
+    HANDLE hp = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (!hp) return vec;
+    PROCESSENTRY32 pe;
+    pe.dwSize = sizeof(PROCESSENTRY32);
+    if (Process32First(hp, &pe)) {
+      do {
+        message_pump();
+        if (pe.th32ProcessID == proc_id) {
+          std::string comm = pe.szExeFile; std::size_t len = comm.length();
+          if (len >= 4 && !comm.substr(len - 4).compare(".exe")) {
+            if (!proc_id_is_kernel_thread(pe.th32ParentProcessID)) {
+              //if (proc_id_and_parent_proc_id_compare_creation_time(pe.th32ProcessID, pe.th32ParentProcessID)) {
+                vec.push_back(pe.th32ParentProcessID);
+              //}
+            }
+          }
+          break;
+        }
+      } while (Process32Next(hp, &pe));
+    }
+    CloseHandle(hp);
+    #elif (defined(__APPLE__) && defined(__MACH__))
+    proc_bsdinfo proc_info;
+    if (proc_pidinfo(proc_id, PROC_PIDTBSDINFO, 0, &proc_info, sizeof(proc_info)) > 0) {
+      if (!(proc_info.pbi_flags & P_SYSTEM)) {
+        if (!proc_id_is_kernel_thread(proc_info.pbi_ppid)) {
+          //if (proc_id_and_parent_proc_id_compare_creation_time(proc_info.pbi_pid, proc_info.pbi_ppid)) {
+            vec.push_back(proc_info.pbi_ppid);
+          //}
+        }
+      }
+    }
+    #elif (defined(__linux__) || defined(__ANDROID__))
+    char buffer[BUFSIZ];
+    FILE *file = nullptr;
+    std::string procfs_path;
+    if (proc_id == proc_id_from_self()) {
+      procfs_path = "/proc/self/stat";
+    } else {
+      procfs_path = std::string("/proc/") + std::to_string(proc_id) + std::string("/stat");
+    }
+    if ((file = fopen(procfs_path.c_str(), "r"))) {
+      if ((fread(buffer, sizeof(char), sizeof(buffer), file)) > 0) {
+        char *token = nullptr;
+        if (((token = strtok(buffer, " "))) &&
+          ((token = strtok(nullptr, " "))) &&
+          ((token = strtok(nullptr, " "))) &&
+          ((token = strtok(nullptr, " ")))) {
+          proc_id_t parent_proc_id = strtoul(token, nullptr, 10);
+          if (!proc_id_is_kernel_thread(proc_id)) {
+            if (!proc_id_is_kernel_thread(parent_proc_id)) {
+              //if (proc_id_and_parent_proc_id_compare_creation_time(proc_id, parent_proc_id)) {
+                vec.push_back(parent_proc_id);
+              //}
+            }
+          }
+        }
+        fclose(file);
+      }
+    }
+    #elif (defined(__FreeBSD__) || defined(__FreeBSD_kernel__))
+    int cntp = 0;
+    kvm_t *kd = nullptr;
+    kinfo_proc *proc_info = nullptr;
+    const char *nlistf = "/dev/null";
+    const char *memf   = "/dev/null";
+    kd = kvm_openfiles(nlistf, memf, nullptr, O_RDONLY, nullptr);
+    if (!kd) return vec;
+    if ((proc_info = kvm_getprocs(kd, KERN_PROC_PID, proc_id, &cntp))) {
+      if (!(proc_info->ki_flag & P_SYSTEM) || proc_info->ki_pid == 1) {
+        if (!proc_id_is_kernel_thread(proc_info->ki_ppid)) {
+          //if (proc_id_and_parent_proc_id_compare_creation_time(proc_info->ki_pid, proc_info->ki_ppid)) {
+            vec.push_back(proc_info->ki_ppid);
+          //}
+        }
+      }
+    }
+    kvm_close(kd);
+    #elif defined(__DragonFly__)
+    int cntp = 0;
+    kvm_t *kd = nullptr;
+    kinfo_proc *proc_info = nullptr;
+    const char *nlistf = "/dev/null";
+    const char *memf   = "/dev/null";
+    kd = kvm_openfiles(nlistf, memf, nullptr, O_RDONLY, nullptr);
+    if (!kd) return vec;
+    if ((proc_info = kvm_getprocs(kd, KERN_PROC_PID, proc_id, &cntp))) {
+      if (!(proc_info->kp_flags & P_SYSTEM) || proc_info->kp_pid == 1) {
+        if (!proc_id_is_kernel_thread(proc_info->kp_ppid)) {
+          //if (proc_id_and_parent_proc_id_compare_creation_time(proc_info->kp_pid, proc_info->kp_ppid)) {
+            vec.push_back(proc_info->kp_ppid);
+          //}
+        }
+      }
+    }
+    kvm_close(kd);
+    #elif defined(__NetBSD__)
+    int cntp = 0;
+    kvm_t *kd = nullptr;
+    kinfo_proc2 *proc_info = nullptr;
+    kd = kvm_openfiles(nullptr, nullptr, nullptr, KVM_NO_FILES, nullptr);
+    if (!kd) return vec;
+    if ((proc_info = kvm_getproc2(kd, KERN_PROC_PID, proc_id, sizeof(struct kinfo_proc2), &cntp))) {
+      if (!(proc_info->p_flag & P_SYSTEM)) {
+        if (!proc_id_is_kernel_thread(proc_info->p_ppid)) {
+          //if (proc_id_and_parent_proc_id_compare_creation_time(proc_info->p_pid, proc_info->p_ppid)) {
+            vec.push_back(proc_info->p_ppid);
+          //}
+        }
+      }
+    }
+    kvm_close(kd);
+    #elif defined(__OpenBSD__)
+    int cntp = 0;
+    kvm_t *kd = nullptr;
+    kinfo_proc *proc_info = nullptr;
+    kd = kvm_openfiles(nullptr, nullptr, nullptr, KVM_NO_FILES, nullptr);
+    if (!kd) return vec;
+    if ((proc_info = kvm_getprocs(kd, KERN_PROC_PID, proc_id, sizeof(struct kinfo_proc), &cntp))) {
+      if (!(proc_info->p_flag & P_SYSTEM)) {
+        if (!proc_id_is_kernel_thread(proc_info->p_ppid)) {
+          //if (proc_id_and_parent_proc_id_compare_creation_time(proc_info->p_pid, proc_info->p_ppid)) {
+            vec.push_back(proc_info->p_ppid);
+          //}
+        }
+      }
+    }
+    kvm_close(kd);
+    #elif (defined(__sun) && defined(__SVR4))
+    int fd = -1;
+    pstatus_t pstatus;
+    std::string procfs_path;
+    if (proc_id == proc_id_from_self()) {
+      procfs_path = "/proc/self/status";
+    } else {
+      procfs_path = std::string("/proc/") + std::to_string(proc_id) + std::string("/status");
+    }
+    if ((fd = open(procfs_path.c_str(), O_RDONLY)) != -1) {
+      if (read(fd, &pstatus, sizeof(pstatus_t)) > 0) {
+        if (!(pstatus.pr_flags & PR_ISSYS) && pstatus.pr_pid != 0) {
+          if (!proc_id_is_kernel_thread(pstatus.pr_ppid)) {
+            //if (proc_id_and_parent_proc_id_compare_creation_time(pstatus.pr_pid, pstatus.pr_ppid)) {
+              vec.push_back(pstatus.pr_ppid);
+            //}
+          }
+        }
+      }
+      close(fd);
+    }
+    struct pid cur_pid;
+    kvm_t *kd = nullptr;
+    struct proc *proc_info = nullptr;
+    if (!vec.empty()) { 
+      goto finish;
+    }
+    kd = kvm_open(nullptr, nullptr, nullptr, O_RDONLY, nullptr);
+    if (!kd) return vec;
+    if ((proc_info = kvm_getproc(kd, proc_id))) {
+      if (kvm_kread(kd, (std::uintptr_t)proc_info->p_pidp, &cur_pid, sizeof(cur_pid)) != -1) {
+        if (!(proc_info->p_flag & SSYS) && cur_pid.pid_id != 0) {
+          if (!proc_id_is_kernel_thread(proc_info->p_ppid)) {
+            //if (proc_id_and_parent_proc_id_compare_creation_time(cur_pid.pid_id, proc_info->p_ppid)) {
+              vec.push_back(proc_info->p_ppid);
+            //}
+          }
+        }
+      }
+    }
+    kvm_close(kd);
+    finish:
+    #endif
+    return vec;
+  }
+
+  std::vector<proc_id_t> proc_id_from_parent_proc_id(proc_id_t parent_proc_id) {
+    std::vector<proc_id_t> vec;
+    #if (!defined(_WIN32) && !defined(_WIN64))
+    if (parent_proc_id < 0) return vec;
+    #endif
+    #if (defined(_WIN32) || defined(_WIN64))
+    HANDLE hp = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (!hp) return vec;
+    PROCESSENTRY32 pe;
+    pe.dwSize = sizeof(PROCESSENTRY32);
+    if (Process32First(hp, &pe)) {
+      do {
+        message_pump();
+        if (pe.th32ParentProcessID == parent_proc_id) {
+          std::string comm = pe.szExeFile; std::size_t len = comm.length();
+          if (len >= 4 && !comm.substr(len - 4).compare(".exe")) {
+            if (!proc_id_is_kernel_thread(pe.th32ParentProcessID)) {
+              //if (proc_id_and_parent_proc_id_compare_creation_time(pe.th32ProcessID, pe.th32ParentProcessID)) {
+                vec.push_back(pe.th32ProcessID);
+              //}
+            }
+          }
+        }
+      } while (Process32Next(hp, &pe));
+    }
+    CloseHandle(hp);
+    #elif (defined(__APPLE__) && defined(__MACH__))
+    std::vector<proc_id_t> proc_info;
+    proc_info.resize(proc_listpids(PROC_PPID_ONLY, (std::uint32_t)parent_proc_id, nullptr, 0));
+    int cntp = proc_listpids(PROC_PPID_ONLY, (std::uint32_t)parent_proc_id, &proc_info[0], sizeof(proc_id_t) * proc_info.size());
+    for (int i = cntp - 1; i >= 0; i--) {
+      if (proc_info[i] > 0) {
+        if (!proc_id_is_kernel_thread(proc_info[i])) {
+          if (!proc_id_is_kernel_thread(parent_proc_id)) {
+            //if (proc_id_and_parent_proc_id_compare_creation_time(proc_info[i], parent_proc_id)) {
+              vec.push_back(proc_info[i]);
+            //}
+          }
+        }
+      }
+    }
+    #elif ((defined(__linux__) || defined(__ANDROID__)) || (defined(__sun) && defined(__SVR4)))
+    DIR *proc = opendir("/proc");
+    if (!proc) return vec;
+    struct dirent *ent = nullptr;
+    proc_id_t tgid = 0;
+    while ((ent = readdir(proc))) {
+      if (isdigit(*ent->d_name)) {
+        tgid = strtoul(ent->d_name, nullptr, 10);
+        std::vector<proc_id_t> proc_info = parent_proc_id_from_proc_id(tgid);
+        if (!proc_info.empty() && proc_info[0] == parent_proc_id) {
+          if (!proc_id_is_kernel_thread(tgid)) {
+            if (!proc_id_is_kernel_thread(proc_info[0])) {
+              //if (proc_id_and_parent_proc_id_compare_creation_time(tgid, proc_info[0])) {
+                vec.push_back(tgid);
+              //}
+            }
+          }
+        }
+      }
+    }
+    closedir(proc);
+    #elif (defined(__FreeBSD__) || defined(__FreeBSD_kernel__))
+    int cntp = 0;
+    kvm_t *kd = nullptr;
+    kinfo_proc *proc_info = nullptr;
+    const char *nlistf = "/dev/null";
+    const char *memf   = "/dev/null";
+    kd = kvm_openfiles(nlistf, memf, nullptr, O_RDONLY, nullptr);
+    if (!kd) return vec;
+    if ((proc_info = kvm_getprocs(kd, KERN_PROC_PROC, 0, &cntp))) {
+      for (int i = 0; i < cntp; i++) {
+        if (proc_info[i].ki_ppid == parent_proc_id) {
+          if (!(proc_info[i].ki_flag & P_SYSTEM) || proc_info[i].ki_pid == 1) {
+            if (!proc_id_is_kernel_thread(proc_info[i].ki_ppid)) {
+              //if (proc_id_and_parent_proc_id_compare_creation_time(proc_info[i].ki_pid, proc_info[i].ki_ppid)) {
+                vec.push_back(proc_info[i].ki_pid);
+              //}
+            }
+          }
+        }
+      }
+    }
+    kvm_close(kd);
+    #elif defined(__DragonFly__)
+    int cntp = 0;
+    kvm_t *kd = nullptr;
+    kinfo_proc *proc_info = nullptr;
+    const char *nlistf = "/dev/null";
+    const char *memf   = "/dev/null";
+    kd = kvm_openfiles(nlistf, memf, nullptr, O_RDONLY, nullptr);
+    if (!kd) return vec;
+    if ((proc_info = kvm_getprocs(kd, KERN_PROC_ALL, 0, &cntp))) {
+      for (int i = 0; i < cntp; i++) {
+        if (proc_info[i].kp_ppid == parent_proc_id) {
+          if (!(proc_info[i].kp_flags & P_SYSTEM) || proc_info[i].kp_pid == 1) {
+            if (!proc_id_is_kernel_thread(proc_info[i].kp_ppid)) {
+              //if (proc_id_and_parent_proc_id_compare_creation_time(proc_info[i].kp_pid, proc_info[i].kp_ppid)) {
+                vec.push_back(proc_info[i].kp_pid);
+              //}
+            }
+          }
+        }
+      }
+    }
+    kvm_close(kd);
+    #elif defined(__NetBSD__)
+    int cntp = 0;
+    kvm_t *kd = nullptr;
+    kinfo_proc2 *proc_info = nullptr;
+    kd = kvm_openfiles(nullptr, nullptr, nullptr, KVM_NO_FILES, nullptr);
+    if (!kd) return vec;
+    if ((proc_info = kvm_getproc2(kd, KERN_PROC_ALL, 0, sizeof(struct kinfo_proc2), &cntp))) {
+      for (int i = cntp - 1; i >= 0; i--) {
+        if (proc_info[i].p_ppid == parent_proc_id) {
+          if (!(proc_info[i].p_flag & P_SYSTEM)) {
+            if (!proc_id_is_kernel_thread(proc_info[i].p_ppid)) {
+              //if (proc_id_and_parent_proc_id_compare_creation_time(proc_info[i].p_pid, proc_info[i].p_ppid)) {
+                vec.push_back(proc_info[i].p_pid);
+              //}
+            }
+          }
+        }
+      }
+    }
+    kvm_close(kd);
+    #elif defined(__OpenBSD__)
+    int cntp = 0;
+    kvm_t *kd = nullptr;
+    kinfo_proc *proc_info = nullptr;
+    kd = kvm_openfiles(nullptr, nullptr, nullptr, KVM_NO_FILES, nullptr);
+    if (!kd) return vec;
+    if ((proc_info = kvm_getprocs(kd, KERN_PROC_ALL, 0, sizeof(struct kinfo_proc), &cntp))) {
+      for (int i = cntp - 1; i >= 0; i--) {
+        if (proc_info[i].p_ppid == parent_proc_id) {
+          if (!(proc_info[i].p_flag & P_SYSTEM)) {
+            if (!proc_id_is_kernel_thread(proc_info[i].p_ppid)) {
+              //if (proc_id_and_parent_proc_id_compare_creation_time(proc_info[i].p_pid, proc_info[i].p_ppid)) {
+                vec.push_back(proc_info[i].p_pid);
+              //}
+            }
+          }
+        }
+      }
+    }
+    kvm_close(kd);
+    #endif
+    #if (defined(__sun) && defined(__SVR4))
+    struct pid cur_pid;
+    kvm_t *kd = nullptr;
+    struct proc *proc_info = nullptr;
+    if (!vec.empty()) { 
+      goto finish;
+    }
+    kd = kvm_open(nullptr, nullptr, nullptr, O_RDONLY, nullptr);
+    if (!kd) return vec;
+    while ((proc_info = kvm_nextproc(kd))) {
+      if (kvm_kread(kd, (std::uintptr_t)proc_info->p_pidp, &cur_pid, sizeof(cur_pid)) != -1) {
+        if (proc_info->p_ppid == parent_proc_id) {
+          if (!(proc_info->p_flag & SSYS) && cur_pid.pid_id != 0) {
+            if (!proc_id_is_kernel_thread(proc_info->p_ppid)) {
+              //if (proc_id_and_parent_proc_id_compare_creation_time(cur_pid.pid_id, proc_info->p_ppid)) {
+                vec.insert(vec.begin(), cur_pid.pid_id);
+              //}
+            }
+          }
+        }
+      }
+    }
+    kvm_close(kd);
+    finish:
+    #endif
+    std::sort(vec.begin(), vec.end());
+    return vec;
+  }
+
+  std::vector<proc_id_t> proc_id_from_exe(std::string exe) {
+    std::vector<proc_id_t> vec; if (exe.empty()) return vec;
+    auto fnamecmp = [](std::string fname1, std::string fname2) {
+      #if (defined(_WIN32) || defined(_WIN64))
+      std::transform(fname1.begin(), fname1.end(), fname1.begin(), ::toupper);
+      std::transform(fname2.begin(), fname2.end(), fname2.begin(), ::toupper);
+      std::size_t fp = fname2.find_last_of("\\/");
+      bool abspath = (!fname1.empty() && fname1.length() >= 3 && fname1[1] == ':' &&
+        (fname1[2] == '\\' || fname1[2] == '/'));
+      #else
+      std::size_t fp = fname2.find_last_of("/");
+      bool abspath = (!fname1.empty() && fname1.length() >= 1 && fname1[0] == '/');
+      #endif
+      if (fname1.empty() || fname2.empty() || fp == std::string::npos) return false;
+      #if (defined(_WIN32) || defined(_WIN64))
+      if (abspath && fname1.length() == 3) return (fname1 == fname2.substr(0, fp + 1));
+      #else
+      if (abspath && fname1.length() == 1) return (fname1 == fname2.substr(0, fp + 1));
+      #endif
+      if (abspath) return (fname1 == fname2 || fname1 == fname2.substr(0, fp));
+      return (fname1 == fname2.substr(fp + 1));
+    };
+    std::vector<proc_id_t> proc_id = proc_id_enum();
+    for (std::size_t i = 0; i < proc_id.size(); i++) {
+      if (fnamecmp(exe, exe_from_proc_id(proc_id[i]))) {
+        vec.push_back(proc_id[i]);
+      }
+    }
+    return vec;
+  }
+
+  std::vector<proc_id_t> proc_id_from_cwd(std::string cwd) {
+    std::vector<proc_id_t> vec; if (cwd.empty()) return vec;
+    auto fnamecmp = [](std::string fname1, std::string fname2) {
+      #if (defined(_WIN32) || defined(_WIN64))
+      std::transform(fname1.begin(), fname1.end(), fname1.begin(), ::toupper);
+      std::transform(fname2.begin(), fname2.end(), fname2.begin(), ::toupper);
+      #endif
+      if (fname1.empty() || fname2.empty()) return false;
+      return (fname1 == fname2);
+    };
+    std::vector<proc_id_t> proc_id = proc_id_enum();
+    for (std::size_t i = 0; i < proc_id.size(); i++) {
+      if (fnamecmp(cwd, cwd_from_proc_id(proc_id[i]))) {
+        vec.push_back(proc_id[i]);
+      }
+    }
+    return vec;
+  }
+
+  std::string exe_from_proc_id(proc_id_t proc_id) {
+    std::string path;
+    if (proc_id_is_kernel_thread(proc_id)) {
+      return path;
+    }
+    #if (!defined(_WIN32) && !defined(_WIN64))
+    if (proc_id < 0) return path;
+    #endif
+    #if (defined(_WIN32) || defined(_WIN64))
+    if (proc_id == proc_id_from_self()) {
+      wchar_t buffer[MAX_PATH];
+      if (GetModuleFileNameW(nullptr, buffer, sizeof(buffer))) {
+        wchar_t exe[MAX_PATH];
+        if (_wrealpath(buffer, exe)) {
+          path = narrow(exe);
+        }
+      }
+    } else {
+      HANDLE proc = open_process_with_debug_privilege(proc_id);
+      if (!proc) return path;
+      wchar_t buffer[MAX_PATH];
+      unsigned long size = sizeof(buffer);
+      if (QueryFullProcessImageNameW(proc, 0, buffer, &size)) {
+        wchar_t exe[MAX_PATH];
+        if (_wrealpath(buffer, exe)) {
+          path = narrow(exe);
+        }
+      }
+      CloseHandle(proc);
+    }
+    #elif (defined(__APPLE__) && defined(__MACH__))
+    if (proc_id == proc_id_from_self()) {
+      char buffer[PATH_MAX];
+      std::uint32_t size = sizeof(buffer);
+      if (!_NSGetExecutablePath(buffer, &size)) {
+        char exe[PATH_MAX];
+        if (realpath(buffer, exe)) {
+          path = exe;
+        }
+      }
+    } else {
+      char buffer[PROC_PIDPATHINFO_MAXSIZE];
+      if (proc_pidpath(proc_id, buffer, sizeof(buffer)) > 0) {
+        char exe[PATH_MAX];
+        if (realpath(buffer, exe)) {
+          path = exe;
+        }
+      }
+    }
+    #elif (defined(__linux__) || defined(__ANDROID__))
+    char exe[PATH_MAX];
+    if (proc_id == proc_id_from_self()) {
+      if (realpath("/proc/self/exe", exe)) {
+        path = exe;
+      }
+    } else {
+      if (realpath((std::string("/proc/") + std::to_string(proc_id) + 
+        std::string("/exe")).c_str(), exe)) {
+        path = exe;
+      }
+    }
+    #elif ((defined(__FreeBSD__) || defined(__FreeBSD_kernel__)) || defined(__DragonFly__))
+    int mib[4];
+    std::size_t len = 0;
+    mib[0] = CTL_KERN;
+    mib[1] = KERN_PROC;
+    mib[2] = KERN_PROC_PATHNAME;
+    mib[3] = proc_id;
+    if (!sysctl(mib, 4, nullptr, &len, nullptr, 0)) {
+      std::vector<char> vecbuff;
+      vecbuff.resize(len);
+      char *buffer = &vecbuff[0];
+      if (!sysctl(mib, 4, buffer, &len, nullptr, 0)) {
+        char exe[PATH_MAX];
+        if (realpath(buffer, exe)) {
+          path = exe;
+        }
+      }
+    }
+    #elif defined(__NetBSD__)
+    int mib[4];
+    std::size_t len = 0;
+    mib[0] = CTL_KERN;
+    mib[1] = KERN_PROC_ARGS;
+    mib[2] = proc_id;
+    mib[3] = KERN_PROC_PATHNAME;
+    if (!sysctl(mib, 4, nullptr, &len, nullptr, 0)) {
+      std::vector<char> vecbuff;
+      vecbuff.resize(len);
+      char *buffer = &vecbuff[0];
+      if (!sysctl(mib, 4, buffer, &len, nullptr, 0)) {
+        char exe[PATH_MAX];
+        if (realpath(buffer, exe)) {
+          path = exe;
+        }
+      }
+    }
+    #elif defined(__OpenBSD__)
+    auto verify_exe = [](proc_id_t proc_id, std::string exe) {
+      int cntp = 0;
+      std::string res;
+      kvm_t *kd = nullptr;
+      kinfo_file *kif = nullptr;
+      bool error1 = false, error2 = false;
+      kd = kvm_openfiles(nullptr, nullptr, nullptr, KVM_NO_FILES, nullptr);
+      if (kd) {
+        if ((kif = kvm_getfiles(kd, KERN_FILE_BYPID, proc_id, sizeof(struct kinfo_file), &cntp))) {
+          for (int i = 0; i < cntp && kif[i].fd_fd < 0; i++) {
+            if (kif[i].fd_fd == KERN_FILE_TEXT) {
+              fallback:
+              struct stat st;
+              char buffer[PATH_MAX];
+              if (!stat(exe.c_str(), &st) && (st.st_mode & S_IXUSR) &&
+                S_ISREG(st.st_mode) && realpath(exe.c_str(), buffer) &&
+                st.st_dev == (dev_t)kif[i].va_fsid && st.st_ino == (ino_t)kif[i].va_fileid) {
+                res = buffer;
+              }
+              if (res.empty() && !error1) {
+                error1 = true;
+                std::size_t last_slash_pos = exe.find_last_of("/");
+                if (last_slash_pos != std::string::npos) {
+                  exe = exe.substr(0, last_slash_pos + 1) + kif[i].p_comm;
+                  goto fallback;
+                }
+              }
+              if (res.empty() && !error2 && proc_id == proc_id_from_self()) {
+                error2 = true;
+                std::size_t last_slash_pos = exe.find_last_of("/");
+                if (last_slash_pos != std::string::npos) {
+                  const char *progname = getprogname();
+                  if (progname) {
+                    exe = exe.substr(0, last_slash_pos + 1) + progname;
+                    goto fallback;
+                  }
+                }
+              }
+              break;
+            }
+          }
+        }
+        kvm_close(kd);
+      }
+      return res;
+    };
+    std::string argv0;
+    bool argv0_does_not_exist = false;
+    std::size_t slash_pos = std::string::npos;
+    std::size_t colon_pos = std::string::npos;
+    std::vector<std::string> cmdline = cmdline_from_proc_id(proc_id); 
+    std::string buffer = ((!cmdline.empty() && !cmdline[0].empty()) ? cmdline[0] : "");
+    bool error = false, retried = false, leading_dash_removed = false;
+    if (buffer.empty()) {
+      argv0_does_not_exist = true;
+      goto path_lookup;
+    } else {
+      fallback:
+      slash_pos = buffer.find('/');
+      colon_pos = buffer.find(':');
+      if (slash_pos == 0) {
+        argv0 = buffer;
+        path = verify_exe(proc_id, argv0);
+      } else if (slash_pos == std::string::npos || (colon_pos != std::string::npos && colon_pos > 0 && slash_pos > colon_pos)) {
+        path_lookup:
+        retry_without_leading_dash:
+        std::string penv = envvar_value_from_proc_id(proc_id, "PATH");
+        if (!penv.empty()) {
+          retry:
+          std::string tmp;
+          std::stringstream sstr(penv);
+          while (std::getline(sstr, tmp, ':')) {
+            argv0 = tmp + "/" + buffer;
+            path = verify_exe(proc_id, argv0);
+            if (!path.empty()) break;
+            if (!argv0_does_not_exist && colon_pos != std::string::npos && colon_pos > 0 && slash_pos > colon_pos) {
+              argv0 = tmp + "/" + buffer.substr(0, colon_pos);
+              path = verify_exe(proc_id, argv0);
+              if (!path.empty()) break;
+            }
+          }
+        }
+        if (path.empty() && !retried) {
+          retried = true;
+          penv = "/usr/bin:/bin:/usr/sbin:/sbin:/usr/X11R6/bin:/usr/local/bin:/usr/local/sbin";
+          std::string home = envvar_value_from_proc_id(proc_id, "HOME");
+          if (!home.empty()) {
+            penv = home + "/bin:" + penv;
+          }
+          goto retry;
+        }
+        if (path.empty() && !argv0_does_not_exist && !leading_dash_removed && slash_pos == std::string::npos && buffer.length() > 1 && buffer[0] == '-') {
+          buffer = buffer.substr(1);
+          retried = false;
+          leading_dash_removed = true;
+          goto retry_without_leading_dash;
+        }
+      }
+      if (path.empty() && (argv0_does_not_exist || (slash_pos != std::string::npos && slash_pos > 0))) {
+        std::string pwd = envvar_value_from_proc_id(proc_id, "PWD");
+        if (!pwd.empty()) {
+          argv0 = pwd + "/" + buffer;
+          path = verify_exe(proc_id, argv0);
+        }
+        if (path.empty()) {
+          std::string cwd = cwd_from_proc_id(proc_id);
+          if (!cwd.empty()) {
+            argv0 = cwd + "/" + buffer;
+            path = verify_exe(proc_id, argv0);
+          }
+        }
+      }
+      if (path.empty() && !error) {
+        error = true;
+        buffer.clear();
+        std::string underscore = envvar_value_from_proc_id(proc_id, "_");
+        if (!underscore.empty()) {
+          buffer = underscore;
+          leading_dash_removed = false;
+          retried = false;
+          goto fallback;
+        }
+      }
+    }
+    if (path.empty() && !argv0_does_not_exist) {
+      argv0_does_not_exist = true;
+      retried = false;
+      buffer.clear();
+      goto path_lookup;
+    }
+    #elif (defined(__sun) && defined(__SVR4))
+    if (proc_id == proc_id_from_self()) {
+      const char *execname = getexecname();
+      if (execname) {
+        char exe[PATH_MAX];
+        if (realpath(execname, exe)) {
+          path = exe;
+        }
+      }
+    } else {
+      int err = 0;
+      char buffer[PATH_MAX];
+      struct ps_prochandle *P = nullptr;
+      P = Pgrab(proc_id, PGRAB_RDONLY, &err);
+      if (P) {
+        if (!err) {
+          if (Pexecname(P, buffer, sizeof(buffer))) {
+            char exe[PATH_MAX];
+            if (realpath(buffer, exe)) {
+              path = exe;
+            }
+          }
+        }
+        Pfree(P);
+      }
+    }
+    if (path.empty()) {
+      char exe[PATH_MAX];
+      if (proc_id == proc_id_from_self()) {
+        if (realpath("/proc/self/path/a.out", exe)) {
+          path = exe;
+        }
+      } else {
+        if (realpath((std::string("/proc/") + std::to_string(proc_id) + 
+          std::string("/path/a.out")).c_str(), exe)) {
+          path = exe;
+        }
+      }
+    }
+    #endif
+    return path;
+  }
+
+  std::string cwd_from_proc_id(proc_id_t proc_id) {
+    std::string path;
+    if (proc_id_is_kernel_thread(proc_id)) {
+      return path;
+    }
+    #if (!defined(_WIN32) && !defined(_WIN64))
+    if (proc_id < 0) return path;
+    #endif
+    #if (defined(_WIN32) || defined(_WIN64))
+    if (proc_id == proc_id_from_self()) {
+      wchar_t buffer[MAX_PATH];
+      if (GetCurrentDirectoryW(MAX_PATH, buffer)) {
+        wchar_t cwd[MAX_PATH];
+        if (_wrealpath(buffer, cwd)) {
+          path = narrow(cwd);
+        }
+      }
+    } else {
+      HANDLE proc = open_process_with_debug_privilege(proc_id);
+      if (!proc) return path;
+      std::vector<wchar_t> buffer1 = cmd_env_cwd_from_proc(proc, MEMCWD);
+      if (!buffer1.empty()) {
+        std::wstring buffer2 = &buffer1[0];
+        if (!buffer2.empty() && std::count(buffer2.begin(), buffer2.end(), '\\') > 1 && buffer2.back() == '\\') {
+          buffer2 = buffer2.substr(0, buffer2.length() - 1);
+          wchar_t cwd[MAX_PATH];
+          if (_wrealpath(buffer2.c_str(), cwd)) {
+            path = narrow(cwd);
+          }
+        }
+      }
+      CloseHandle(proc);
+    }
+    #elif (defined(__APPLE__) && defined(__MACH__))
+    if (proc_id == proc_id_from_self()) {
+      char buffer[PATH_MAX];
+      if (getcwd(buffer, PATH_MAX)) {
+        char cwd[PATH_MAX];
+        if (realpath(buffer, cwd)) {
+           path = cwd;
+        }
+      }
+    } else {
+      proc_vnodepathinfo vpi;
+      if (proc_pidinfo(proc_id, PROC_PIDVNODEPATHINFO, 0, &vpi, sizeof(vpi)) > 0) {
+        char cwd[PATH_MAX];
+        if (realpath(vpi.pvi_cdir.vip_path, cwd)) {
+          path = cwd;
+        }
+      }
+    }
+    #elif (defined(__linux__) || defined(__ANDROID__))
+    if (proc_id == proc_id_from_self()) {
+      char buffer[PATH_MAX];
+      if (getcwd(buffer, PATH_MAX)) {
+        char cwd[PATH_MAX];
+        if (realpath(buffer, cwd)) {
+           path = cwd;
+        }
+      }
+    } else {
+      char cwd[PATH_MAX];
+      if (realpath((std::string("/proc/") + std::to_string(proc_id) + 
+        std::string("/cwd")).c_str(), cwd)) {
+        path = cwd;
+      }
+    }
+    #elif (defined(__FreeBSD__) || defined(__FreeBSD_kernel__))
+    if (proc_id == proc_id_from_self()) {
+      char buffer[PATH_MAX];
+      if (getcwd(buffer, PATH_MAX)) {
+        char cwd[PATH_MAX];
+        if (realpath(buffer, cwd)) {
+           path = cwd;
+        }
+      }
+    } else {
+      int mib[4];
+      struct kinfo_file kif;
+      std::size_t len = sizeof(kif);
+      mib[0] = CTL_KERN;
+      mib[1] = KERN_PROC;
+      mib[2] = KERN_PROC_CWD;
+      mib[3] = proc_id;
+      if (!sysctl(mib, 4, nullptr, &len, nullptr, 0)) {
+        memset(&kif, 0, len);
+        if (!sysctl(mib, 4, &kif, &len, nullptr, 0)) {
+          char cwd[PATH_MAX];
+          if (realpath(kif.kf_path, cwd)) {
+             path = cwd;
+          }
+        }
+      }
+    }
+    #elif defined(__DragonFly__)
+    if (proc_id == proc_id_from_self()) {
+      char buffer[PATH_MAX];
+      if (getcwd(buffer, PATH_MAX)) {
+        char cwd[PATH_MAX];
+        if (realpath(buffer, cwd)) {
+           path = cwd;
+        }
+      }
+    } else {
+      int mib[4];
+      char buffer[PATH_MAX];
+      std::size_t len = sizeof(buffer);
+      mib[0] = CTL_KERN;
+      mib[1] = KERN_PROC;
+      mib[2] = KERN_PROC_CWD;
+      mib[3] = proc_id;
+      if (!sysctl(mib, 4, buffer, &len, nullptr, 0)) {
+        char cwd[PATH_MAX];
+        if (realpath(buffer, cwd)) {
+          path = cwd;
+        }
+      }
+    }
+    #elif defined(__NetBSD__)
+    if (proc_id == proc_id_from_self()) {
+      char buffer[PATH_MAX];
+      if (getcwd(buffer, PATH_MAX)) {
+        char cwd[PATH_MAX];
+        if (realpath(buffer, cwd)) {
+           path = cwd;
+        }
+      }
+    } else {
+      int mib[4];
+      std::size_t len = 0;
+      mib[0] = CTL_KERN;
+      mib[1] = KERN_PROC_ARGS;
+      mib[2] = proc_id;
+      mib[3] = KERN_PROC_CWD;
+      if (!sysctl(mib, 4, nullptr, &len, nullptr, 0)) {
+        std::vector<char> vecbuff;
+        vecbuff.resize(len);
+        char *buffer = &vecbuff[0];
+        if (!sysctl(mib, 4, buffer, &len, nullptr, 0)) {
+          char cwd[PATH_MAX];
+          if (realpath(buffer, cwd)) {
+            path = cwd;
+          }
+        }
+      }
+    }
+    #elif defined(__OpenBSD__)
+    if (proc_id == proc_id_from_self()) {
+      char buffer[PATH_MAX];
+      if (getcwd(buffer, PATH_MAX)) {
+        char cwd[PATH_MAX];
+        if (realpath(buffer, cwd)) {
+           path = cwd;
+        }
+      }
+    } else {
+      int mib[3];
+      std::size_t len = 0;
+      mib[0] = CTL_KERN;
+      mib[1] = KERN_PROC_CWD;
+      mib[2] = proc_id;
+      if (!sysctl(mib, 3, nullptr, &len, nullptr, 0)) {
+        std::vector<char> vecbuff;
+        vecbuff.resize(len);
+        char *buffer = &vecbuff[0];
+        if (!sysctl(mib, 3, buffer, &len, nullptr, 0)) {
+          char cwd[PATH_MAX];
+          if (realpath(buffer, cwd)) {
+            path = cwd;
+          }
+        }
+      }
+    }
+    #elif (defined(__sun) && defined(__SVR4))
+    if (proc_id == proc_id_from_self()) {
+      char buffer[PATH_MAX];
+      if (getcwd(buffer, PATH_MAX)) {
+        char cwd[PATH_MAX];
+        if (realpath(buffer, cwd)) {
+           path = cwd;
+        }
+      }
+    } else {
+      #if defined(__illumos__)
+      int err = 0;
+      struct ps_prochandle *P = nullptr;
+      P = Pgrab(proc_id, PGRAB_RDONLY, &err);
+      if (P) {
+        if (!err) {
+          prcwd_t *ptr = nullptr;
+          if (!Pcwd(P, &ptr)) {
+            char cwd[PATH_MAX];
+            if (realpath(ptr->prcwd_cwd, cwd)) {
+              path = cwd;
+            }
+            Pcwd_free(ptr);
+          }
+        }
+        Pfree(P);
+        if (!path.empty()) {
+          return path;
+        }
+      }
+      #endif
+      char cwd[PATH_MAX];
+      if (realpath((std::string("/proc/") + std::to_string(proc_id) + 
+        std::string("/path/cwd")).c_str(), cwd)) {
+        path = cwd;
+      }
+    }
+    #endif
+    return path;
+  }
+
+  std::string comm_from_proc_id(proc_id_t proc_id) {
+    std::string comm;
+    #if (!defined(_WIN32) && !defined(_WIN64))
+    if (proc_id < 0) return comm;
+    #endif
+    #if (defined(_WIN32) || defined(_WIN64))
+    HANDLE hp = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (!hp) return comm;
+    PROCESSENTRY32 pe;
+    pe.dwSize = sizeof(PROCESSENTRY32);
+    if (Process32First(hp, &pe)) {
+      do {
+        message_pump();
+        if (pe.th32ProcessID == proc_id) {
+          comm = pe.szExeFile; std::size_t len = comm.length();
+          if (len < 4 || comm.substr(len - 4).compare(".exe")) {
+            comm.clear();
+          }
+          break;
+        }
+      } while (Process32Next(hp, &pe));
+    }
+    CloseHandle(hp);
+    #elif (defined(__APPLE__) && defined(__MACH__))
+    proc_bsdinfo proc_info;
+    if (proc_pidinfo(proc_id, PROC_PIDTBSDINFO, 0, &proc_info, sizeof(proc_info)) > 0) {
+      if (!(proc_info.pbi_flags & P_SYSTEM)) {
+        comm = proc_info.pbi_comm;
+      }
+    }
+    #elif (defined(__linux__) || defined(__ANDROID__))
+    std::string procfs_path;
+    if (proc_id == proc_id_from_self()) {
+      procfs_path = "/proc/self/comm";
+    } else {
+      procfs_path = "/proc/" + std::to_string(proc_id) + "/comm";
+    }
+    std::ifstream file(procfs_path);
+    if (file.is_open()) {
+      if (!proc_id_is_kernel_thread(proc_id)) {
+        std::getline(file, comm);
+      }
+    }
+    #elif (defined(__FreeBSD__) || defined(__FreeBSD_kernel__))
+    int cntp = 0;
+    kvm_t *kd = nullptr;
+    kinfo_proc *proc_info = nullptr;
+    const char *nlistf = "/dev/null";
+    const char *memf   = "/dev/null";
+    kd = kvm_openfiles(nlistf, memf, nullptr, O_RDONLY, nullptr);
+    if (!kd) return comm;
+    if ((proc_info = kvm_getprocs(kd, KERN_PROC_PID, proc_id, &cntp))) {
+      if (!(proc_info->ki_flag & P_SYSTEM) || proc_info->ki_pid == 1) {
+        comm = proc_info->ki_comm;
+      }
+    }
+    kvm_close(kd);
+    #elif defined(__DragonFly__)
+    int cntp = 0;
+    kvm_t *kd = nullptr;
+    kinfo_proc *proc_info = nullptr;
+    const char *nlistf = "/dev/null";
+    const char *memf   = "/dev/null";
+    kd = kvm_openfiles(nlistf, memf, nullptr, O_RDONLY, nullptr);
+    if (!kd) return comm;
+    if ((proc_info = kvm_getprocs(kd, KERN_PROC_PID, proc_id, &cntp))) {
+      if (!(proc_info->kp_flags & P_SYSTEM) || proc_info->kp_pid == 1) {
+        comm = proc_info->kp_comm;
+      }
+    }
+    kvm_close(kd);
+    #elif defined(__NetBSD__)
+    int cntp = 0;
+    kvm_t *kd = nullptr;
+    kinfo_proc2 *proc_info = nullptr;
+    kd = kvm_openfiles(nullptr, nullptr, nullptr, KVM_NO_FILES, nullptr);
+    if (!kd) return comm;
+    if ((proc_info = kvm_getproc2(kd, KERN_PROC_PID, proc_id, sizeof(struct kinfo_proc2), &cntp))) {
+      if (!(proc_info->p_flag & P_SYSTEM)) {
+        comm = proc_info->p_comm;
+      }
+    }
+    kvm_close(kd);
+    #elif defined(__OpenBSD__)
+    int cntp = 0;
+    kvm_t *kd = nullptr;
+    kinfo_proc *proc_info = nullptr;
+    kd = kvm_openfiles(nullptr, nullptr, nullptr, KVM_NO_FILES, nullptr);
+    if (!kd) return comm;
+    if ((proc_info = kvm_getprocs(kd, KERN_PROC_PID, proc_id, sizeof(struct kinfo_proc), &cntp))) {
+      if (!(proc_info->p_flag & P_SYSTEM)) {
+        comm = proc_info->p_comm;
+      }
+    }
+    kvm_close(kd);
+    #elif (defined(__sun) && defined(__SVR4))
+    if (!proc_id_is_kernel_thread(proc_id)) {
+      int fd = -1;
+      psinfo_t psinfo;
+      std::string procfs_path;
+      if (proc_id == proc_id_from_self()) {
+        procfs_path = "/proc/self/psinfo";
+      } else {
+        procfs_path = std::string("/proc/") + std::to_string(proc_id) + std::string("/psinfo");
+      }
+      if ((fd = open(procfs_path.c_str(), O_RDONLY)) != -1) {
+        if (read(fd, &psinfo, sizeof(psinfo_t)) > 0) {
+          if (!proc_id_is_kernel_thread(psinfo.pr_pid)) {
+            comm = psinfo.pr_fname;
+          }
+        }
+        close(fd);
+      }
+    }
+    struct pid cur_pid;
+    kvm_t *kd = nullptr;
+    struct proc *proc_info = nullptr;
+    struct user *proc_user = nullptr;
+    if (!comm.empty()) { 
+      goto finish;
+    }
+    kd = kvm_open(nullptr, nullptr, nullptr, O_RDONLY, nullptr);
+    if (!kd) return comm;
+    if ((proc_info = kvm_getproc(kd, proc_id))) {
+      if (kvm_kread(kd, (std::uintptr_t)proc_info->p_pidp, &cur_pid, sizeof(cur_pid)) != -1) {
+        if (!(proc_info->p_flag & SSYS) && cur_pid.pid_id != 0) {
+          if ((proc_user = kvm_getu(kd, proc_info))) {
+            comm = proc_user->u_comm;
+          }
+        }
+      }
+    }
+    kvm_close(kd);
+    finish:
+    #endif
+    return comm;
+  }
+
+  std::vector<std::string> cmdline_from_proc_id(proc_id_t proc_id) {
+    std::vector<std::string> vec;
+    if (proc_id_is_kernel_thread(proc_id)) {
+      return vec;
+    }
+    #if (!defined(_WIN32) && !defined(_WIN64))
+    if (proc_id < 0) return vec;
+    #endif
+    #if (defined(_WIN32) || defined(_WIN64))
+    HANDLE proc = open_process_with_debug_privilege(proc_id);
+    if (!proc) return vec;
+    int cmdsize = 0;
+    std::vector<wchar_t> buffer = cmd_env_cwd_from_proc(proc, MEMCMD);
+    if (!buffer.empty()) {
+      wchar_t **cmd = CommandLineToArgvW(&buffer[0], &cmdsize);
+      if (cmd) {
+        for (int i = 0; i < cmdsize; i++) {
+          message_pump();
+          vec.push_back(narrow(cmd[i]));
+        }
+        LocalFree(cmd);
+      }
+    }
+    CloseHandle(proc);
+    #elif (defined(__APPLE__) && defined(__MACH__))
+    vec = cmd_env_from_proc_id(proc_id, MEMCMD);
+    #elif ((defined(__linux__) || defined(__ANDROID__)) || (defined(__sun) && defined(__SVR4)))
+    FILE *file = nullptr;
+    std::string procfs_path;
+    if (proc_id == proc_id_from_self()) {
+      procfs_path = "/proc/self/cmdline";
+    } else {
+      procfs_path = std::string("/proc/") + std::to_string(proc_id) + std::string("/cmdline");
+    }
+    if ((file = fopen(procfs_path.c_str(), "r"))) {
+      char *cmd = nullptr;
+      std::size_t size = 0;
+      while (getdelim(&cmd, &size, 0, file) != -1) {
+        vec.push_back(cmd);
+      }
+      while (!vec.empty() && vec.back().empty())
+        vec.pop_back();
+      if (cmd) free(cmd);
+      fclose(file);
+    }
+    #elif ((defined(__FreeBSD__) || defined(__FreeBSD_kernel__)) || defined(__DragonFly__))
+    int cntp = 0;
+    kvm_t *kd = nullptr;
+    kinfo_proc *proc_info = nullptr;
+    const char *nlistf = "/dev/null";
+    const char *memf   = "/dev/null";
+    kd = kvm_openfiles(nlistf, memf, nullptr, O_RDONLY, nullptr);
+    if (!kd) return vec;
+    if ((proc_info = kvm_getprocs(kd, KERN_PROC_PID, proc_id, &cntp))) {
+      char **cmd = kvm_getargv(kd, proc_info, 0);
+      if (cmd) {
+        for (int i = 0; cmd[i]; i++) {
+          vec.push_back(cmd[i]);
+        }
+      }
+    }
+    kvm_close(kd);
+    #elif defined(__NetBSD__)
+    int cntp = 0;
+    kvm_t *kd = nullptr;
+    kinfo_proc2 *proc_info = nullptr;
+    kd = kvm_openfiles(nullptr, nullptr, nullptr, KVM_NO_FILES, nullptr);
+    if (!kd) return vec;
+    if ((proc_info = kvm_getproc2(kd, KERN_PROC_PID, proc_id, sizeof(struct kinfo_proc2), &cntp))) {
+      char **cmd = kvm_getargv2(kd, proc_info, 0);
+      if (cmd) {
+        for (int i = 0; cmd[i]; i++) {
+          vec.push_back(cmd[i]);
+        }
+      }
+    }
+    kvm_close(kd);
+    #elif defined(__OpenBSD__)
+    int cntp = 0;
+    kvm_t *kd = nullptr;
+    kinfo_proc *proc_info = nullptr;
+    kd = kvm_openfiles(nullptr, nullptr, nullptr, KVM_NO_FILES, nullptr);
+    if (!kd) return vec;
+    if ((proc_info = kvm_getprocs(kd, KERN_PROC_PID, proc_id, sizeof(struct kinfo_proc), &cntp))) {
+      char **cmd = kvm_getargv(kd, proc_info, 0);
+      if (cmd) {
+        for (int i = 0; cmd[i]; i++) {
+          vec.push_back(cmd[i]);
+        }
+      }
+    }
+    kvm_close(kd);
+    #endif
+    #if (defined(__sun) && defined(__SVR4))
+    if (vec.empty()) {
+      vec = cmd_env_from_proc_id(proc_id, MEMCMD);
+    }
+    kvm_t *kd = nullptr;
+    char **cmd = nullptr;
+    struct proc *proc_info = nullptr;
+    struct user *proc_user = nullptr;
+    if (!vec.empty()) { 
+      goto finish;
+    }
+    kd = kvm_open(nullptr, nullptr, nullptr, O_RDONLY, nullptr);
+    if (!kd) return vec;
+    if ((proc_info = kvm_getproc(kd, proc_id))) {
+      if ((proc_user = kvm_getu(kd, proc_info))) {
+        if (!kvm_getcmd(kd, proc_info, proc_user, &cmd, nullptr)) {
+          for (int i = 0; cmd[i]; i++) {
+            vec.push_back(cmd[i]);
+          }
+          free(cmd);
+        }
+      }
+    }
+    kvm_close(kd);
+    finish:
+    #endif
+    return vec;
+  }
+
+  std::vector<std::string> environ_from_proc_id(proc_id_t proc_id) {
+    std::vector<std::string> vec;
+    if (proc_id_is_kernel_thread(proc_id)) {
+      return vec;
+    }
+    #if (!defined(_WIN32) && !defined(_WIN64))
+    if (proc_id < 0) return vec;
+    #endif
+    #if (defined(_WIN32) || defined(_WIN64))
+    HANDLE proc = open_process_with_debug_privilege(proc_id);
+    if (!proc) return vec;
+    std::vector<wchar_t> buffer = cmd_env_cwd_from_proc(proc, MEMENV);
+    int i = 0;
+    if (!buffer.empty()) {
+      while (buffer[i] != L'\0') {
+        message_pump();
+        vec.push_back(narrow(&buffer[i]));
+        i += (int)(wcslen(&buffer[0] + i) + 1);
+      }
+    }
+    CloseHandle(proc);
+    #elif (defined(__APPLE__) && defined(__MACH__))
+    vec = cmd_env_from_proc_id(proc_id, MEMENV);
+    #elif ((defined(__linux__) || defined(__ANDROID__)) || (defined(__sun) && defined(__SVR4)))
+    FILE *file = nullptr;
+    std::string procfs_path;
+    if (proc_id == proc_id_from_self()) {
+      procfs_path = "/proc/self/environ";
+    } else {
+      procfs_path = std::string("/proc/") + std::to_string(proc_id) + std::string("/environ");
+    }
+    if ((file = fopen(procfs_path.c_str(), "r"))) {
+      char *env = nullptr;
+      std::size_t size = 0;
+      while (getdelim(&env, &size, 0, file) != -1) {
+        vec.push_back(env);
+      }
+      if (env) free(env);
+      fclose(file);
+    }
+    #elif ((defined(__FreeBSD__) || defined(__FreeBSD_kernel__)) || defined(__DragonFly__))
+    int cntp = 0;
+    kvm_t *kd = nullptr;
+    kinfo_proc *proc_info = nullptr;
+    const char *nlistf = "/dev/null";
+    const char *memf   = "/dev/null";
+    kd = kvm_openfiles(nlistf, memf, nullptr, O_RDONLY, nullptr);
+    if (!kd) return vec;
+    if ((proc_info = kvm_getprocs(kd, KERN_PROC_PID, proc_id, &cntp))) {
+      char **env = kvm_getenvv(kd, proc_info, 0);
+      if (env) {
+        for (int i = 0; env[i]; i++) {
+          vec.push_back(env[i]);
+        }
+      }
+    }
+    kvm_close(kd);
+    #elif defined(__NetBSD__)
+    int cntp = 0;
+    kvm_t *kd = nullptr;
+    kinfo_proc2 *proc_info = nullptr;
+    kd = kvm_openfiles(nullptr, nullptr, nullptr, KVM_NO_FILES, nullptr);
+    if (!kd) return vec;
+    if ((proc_info = kvm_getproc2(kd, KERN_PROC_PID, proc_id, sizeof(struct kinfo_proc2), &cntp))) {
+      char **env = kvm_getenvv2(kd, proc_info, 0);
+      if (env) {
+        for (int i = 0; env[i]; i++) {
+          vec.push_back(env[i]);
+        }
+      }
+    }
+    kvm_close(kd);
+    #elif defined(__OpenBSD__)
+    int cntp = 0;
+    kvm_t *kd = nullptr;
+    kinfo_proc *proc_info = nullptr;
+    kd = kvm_openfiles(nullptr, nullptr, nullptr, KVM_NO_FILES, nullptr);
+    if (!kd) return vec;
+    if ((proc_info = kvm_getprocs(kd, KERN_PROC_PID, proc_id, sizeof(struct kinfo_proc), &cntp))) {
+      char **env = kvm_getenvv(kd, proc_info, 0);
+      if (env) {
+        for (int i = 0; env[i]; i++) {
+          vec.push_back(env[i]);
+        }
+      }
+    }
+    kvm_close(kd);
+    #endif
+    #if (defined(__sun) && defined(__SVR4))
+    if (vec.empty()) {
+      vec = cmd_env_from_proc_id(proc_id, MEMENV);
+    }
+    kvm_t *kd = nullptr;
+    char **env = nullptr;
+    struct proc *proc_info = nullptr;
+    struct user *proc_user = nullptr;
+    if (!vec.empty()) { 
+      goto finish;
+    }
+    kd = kvm_open(nullptr, nullptr, nullptr, O_RDONLY, nullptr);
+    if (!kd) return vec;
+    if ((proc_info = kvm_getproc(kd, proc_id))) {
+      if ((proc_user = kvm_getu(kd, proc_info))) {
+        if (!kvm_getcmd(kd, proc_info, proc_user, nullptr, &env)) {
+          for (int i = 0; env[i]; i++) {
+            vec.push_back(env[i]);
+          }
+          free(env);
+        }
+      }
+    }
+    kvm_close(kd);
+    finish:
+    #endif
+    struct is_invalid {
+      bool operator()(std::string envp) {
+        return (envp.find('=') == std::string::npos);
+      }
+    };
+    vec.erase(std::remove_if(vec.begin(), vec.end(), is_invalid()), vec.end());
+    return vec;
+  }
+
+  std::string envvar_value_from_proc_id(proc_id_t proc_id, std::string name) {
+    std::string value;
+    std::vector<std::string> vec = environ_from_proc_id(proc_id);
+    if (!vec.empty()) {
+      for (std::size_t i = 0; i < vec.size(); i++) {
+        message_pump();
+        std::vector<std::string> equalssplit = string_split_by_first_equals_sign(vec[i]);
+        if (equalssplit.size() == 2) {
+          #if (defined(_WIN32) || defined(_WIN64))
+          std::transform(equalssplit[0].begin(), equalssplit[0].end(), equalssplit[0].begin(), ::toupper);
+          std::transform(name.begin(), name.end(), name.begin(), ::toupper);
+          #endif
+          if (equalssplit[0] == name) {
+            value = equalssplit[1];
+            break;
+          }
+        }
+      }
+    }
+    return value;
+  }
+
+  bool envvar_exists_from_proc_id(proc_id_t proc_id, std::string name) {
+    bool exists = false;
+    std::vector<std::string> vec = environ_from_proc_id(proc_id);
+    if (!vec.empty()) {
+      for (std::size_t i = 0; i < vec.size(); i++) {
+        message_pump();
+        std::vector<std::string> equalssplit = string_split_by_first_equals_sign(vec[i]);
+        if (!equalssplit.empty()) {
+          #if (defined(_WIN32) || defined(_WIN64))
+          std::transform(equalssplit[0].begin(), equalssplit[0].end(), equalssplit[0].begin(), ::toupper);
+          std::transform(name.begin(), name.end(), name.begin(), ::toupper);
+          #endif
+          if (equalssplit[0] == name) {
+            exists = true;
+            break;
+          }
+        }
+      }
+    }
+    return exists;
+  }
+
+  proc_id_t spawn_child_proc_id(std::string command, bool wait) {
+    #if (defined(USE_SDL_POLLEVENT) || defined(USE_SDL2_POLLEVENT) || defined(USE_SDL3_POLLEVENT))
+    if (wait) {
+      int prevIndex = ind;
+      std::thread proc_thread(spawn_child_proc_id_helper, command);
+      while (prevIndex == ind) {
+        message_pump();
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+      }
+      while (proc_did_execute.find(ind) == proc_did_execute.end() || !proc_did_execute[ind]) {
+        message_pump();
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+      }
+      proc_id_t proc_index = child_proc_id[ind];
+      SDL_Event event;
+      while (true) {
+        std::lock_guard<std::mutex> guard(complete_mutex);
+        if (complete_map[proc_index]) break;
+        while (SDL_PollEvent(&event) > 0);
+      }
+      proc_thread.join();
+      return proc_index;
+    }
+    #else
+    if (wait) return spawn_child_proc_id_helper(command);
+    #endif
+    int prevIndex = ind;
+    std::thread proc_thread(spawn_child_proc_id_helper, command);
+    while (prevIndex == ind) {
+      message_pump();
+      std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    while (proc_did_execute.find(ind) == proc_did_execute.end() || !proc_did_execute[ind]) {
+      message_pump();
+      std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    proc_id_t proc_index = child_proc_id[ind];
+    std::lock_guard<std::mutex> guard(complete_mutex);
+    complete_map[proc_index] = false;
+    proc_thread.detach();
+    return proc_index;
+  }
+
+  void stdout_set_buffer_limit(long long limit) {
+    optlmt = limit;
+  }
+
+  std::string read_from_stdout_for_child_proc_id(proc_id_t proc_id) {
+    std::lock_guard<std::mutex> guard(stdopt_mutex);
+    if (stdopt_map.find(proc_id) == stdopt_map.end()) return "";
+    return stdopt_map.find(proc_id)->second.c_str();
+  }
+
+  long long write_to_stdin_for_child_proc_id(proc_id_t proc_id, std::string input) {
+    if (stdipt_map.find(proc_id) == stdipt_map.end()) return -1;
+    std::string s = input;
+    std::vector<char> v(s.length());
+    std::copy(s.c_str(), s.c_str() + s.length(), v.begin());
+    #if (!defined(_WIN32) && !defined(_WIN64))
+    ssize_t nwritten = -1;
+    lseek((int)stdipt_map[proc_id], 0, SEEK_END);
+    nwritten = write((int)stdipt_map[proc_id], &v[0], v.size());
+    return nwritten;
+    #else
+    unsigned long dwwritten = -1;
+    SetFilePointer((HANDLE)(void *)stdipt_map[proc_id], 0, nullptr, FILE_END);
+    WriteFile((HANDLE)(void *)stdipt_map[proc_id], &v[0], (unsigned long)v.size(), &dwwritten, nullptr);
+    return (((long long)(unsigned long)-1 != (long long)dwwritten) ? dwwritten : -1);
+    #endif
+  }
+
+  bool child_proc_id_is_complete(proc_id_t proc_id) {
+    std::lock_guard<std::mutex> guard(complete_mutex);
+    if (complete_map.find(proc_id) == complete_map.end()) return false;
+    return complete_map.find(proc_id)->second;
+  }
+
+  std::string read_from_stdin_for_self() {
+    std::string standard_input;
+    #if (defined(_WIN32) || defined(_WIN64))
+    proc_id_t proc_id = spawn_child_proc_id("uname -o", false);
+    while (proc_id != 0 && !child_proc_id_is_complete(proc_id));
+    std::string output = read_from_stdout_for_child_proc_id(proc_id);
+    free_stdout_for_child_proc_id(proc_id);
+    free_stdin_for_child_proc_id(proc_id);
+    // This function is not compatible with the Msys or Cygwin Terminal:
+    if (!output.substr(0, 4).compare("Msys") || !output.substr(0, 6).compare("Cygwin")) {
+      return standard_input;
+    }
+    if (_isatty(_fileno(stdin))) {
+      return standard_input;
+    }
+    std::vector<char> buff;
+    HANDLE handle = GetStdHandle(STD_INPUT_HANDLE);
+    if (handle == INVALID_HANDLE_VALUE) {
+      return standard_input;
+    }
+    if (GetFileType(handle) == FILE_TYPE_PIPE) {
+      unsigned long mode = 0;
+      if (GetConsoleMode(handle, &mode)) {
+        unsigned long bytes_avail = 0;
+        if (PeekNamedPipe(handle, nullptr, 0, nullptr, &bytes_avail, nullptr)) {
+          unsigned long bytes_read = 0;
+          buff.resize(bytes_avail);
+          if (PeekNamedPipe(handle, &buff[0], bytes_avail, &bytes_read, nullptr, nullptr)) {
+            standard_input = buff.data();
+          }
+        }
+      } else {
+        unsigned long nRead = BUFSIZ;
+        buff.resize(nRead);
+        while (ReadFile(handle, &buff[0], nRead, &nRead, nullptr) && nRead) {
+          message_pump();
+          standard_input.append(buff.data(), nRead);
+        }
+      }
+    } else {
+      unsigned long mode = 0;
+      if (GetConsoleMode(handle, &mode)) {
+        struct stat st;
+        if (!fstat(_fileno(stdin), &st)) {
+          std::vector<wchar_t> buff;
+          buff.resize(st.st_size + 1);
+          if (fgetws(&buff[0], st.st_size + 1, stdin)) {
+            std::wstring wstr(buff.begin(), buff.end());
+            standard_input = narrow(wstr);
+          }
+        }
+      } else {
+        unsigned long nRead = BUFSIZ;
+        buff.resize(nRead);
+        while (ReadFile(handle, &buff[0], nRead, &nRead, nullptr) && nRead) {
+          message_pump();
+          standard_input.append(buff.data(), nRead);
+        }
+      }
+    }
+    #else
+    if (isatty(fileno(stdin))) {
+      return standard_input;
+    }
+    std::vector<char> buff;
+    ssize_t nread = BUFSIZ;
+    buff.resize(nread);
+    while ((nread = read(fileno(stdin), &buff[0], nread)) > 0) {
+      standard_input.append(buff.data(), nread);
+    }
+    #endif
+    return standard_input;
+  }
+
+  bool free_stdout_for_child_proc_id(proc_id_t proc_id) {
+    if (stdopt_map.find(proc_id) == stdopt_map.end()) return false;
+    stdopt_map.erase(proc_id);
+    return true;
+  }
+
+  bool free_stdin_for_child_proc_id(proc_id_t proc_id) {
+    if (stdipt_map.find(proc_id) == stdipt_map.end()) return false;
+    stdipt_map.erase(proc_id);
+    return true;
+  }
+
+} // namespace apiprocess
+#endif
